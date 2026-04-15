@@ -2321,34 +2321,70 @@ async def choose_action(c: CallbackQuery):
 # -------------------------
 # Задачи
 # -------------------------
-
+ 
 @dp.callback_query(F.data == "task_add")
 async def task_add(c: CallbackQuery, state: FSMContext):
-    await state.set_state("task_name")
+    await state.set_state(AddTask.name)
     await c.message.answer("📝 Введи задачу:")
 
-@dp.message(StateFilter("task_name"))
+
+@dp.message(AddTask.name)
 async def task_name(m: Message, state: FSMContext):
-    await state.update_data(name=m.text.strip())
-    await state.set_state("task_time")
+    name = m.text.strip()
 
-    await m.answer("⏰ Выбери время:", reply_markup=time_keyboard())
-    
-@dp.callback_query(StateFilter("task_time"), F.data.startswith("time_"))
-async def task_time(c: CallbackQuery, state: FSMContext):
-    time = c.data.replace("time_", "")
+    if not name:
+        return await m.answer("Пусто")
+
+    await state.update_data(name=name)
+    await state.set_state(AddTask.time)
+
+    await m.answer("⏰ Выбери час:", reply_markup=get_hours_kb())
+
+
+@dp.callback_query(AddTask.time, F.data.startswith("hour_"))
+async def task_select_hour(c: CallbackQuery, state: FSMContext):
+    hour = c.data.split("_")[1]
+
+    await state.update_data(hour=hour)
+
+    await c.message.edit_text(
+        "Выбери минуты",
+        reply_markup=get_minutes_kb(hour)
+    )
+
+
+@dp.callback_query(AddTask.time, F.data.startswith("min_"))
+async def task_select_minute(c: CallbackQuery, state: FSMContext):
+    _, hour, minute = c.data.split("_")
+
+    time = f"{hour}:{minute}"
+
     await state.update_data(time=time)
-
-    await state.set_state("task_reminder")
+    await state.set_state(AddTask.reminder)
 
     await c.message.edit_text(
         "🔔 Напоминание?",
-        reply_markup=reminder_keyboard()
-    )    
- 
-@dp.callback_query(StateFilter("task_reminder"))
-async def task_reminder(c: CallbackQuery, state: FSMContext):
-    reminder = int(c.data.replace("rem_", ""))
+        reply_markup=reminder_kb()
+    )
+
+
+@dp.callback_query(AddTask.time, F.data == "skip_time")
+async def task_skip_time(c: CallbackQuery, state: FSMContext):
+    await state.update_data(time=None)
+    await state.set_state(AddTask.reminder)
+
+    await c.message.edit_text(
+        "🔔 Напоминание?",
+        reply_markup=reminder_kb()
+    )
+
+
+@dp.callback_query(AddTask.reminder, F.data.startswith("rem_"))
+async def task_set_reminder(c: CallbackQuery, state: FSMContext):
+    if c.data == "rem_skip":
+        reminder = None
+    else:
+        reminder = int(c.data.split("_")[1])
 
     data = await state.get_data()
 
@@ -2357,12 +2393,13 @@ async def task_reminder(c: CallbackQuery, state: FSMContext):
         name=data["name"],
         days="",
         h_type="personal",
-        time=data["time"],
+        time=data.get("time"),
         task_type="task",
         reminder=reminder
     )
 
     await state.clear()
+
     await c.message.edit_text("✅ Задача создана")
 
  
@@ -2380,20 +2417,20 @@ async def task_list(c: CallbackQuery):
 
     for i, h in enumerate(tasks, start=1):
         hid, name, *_ = h
-        text += f"{i}) {name}\n"
 
         kb.append([
             InlineKeyboardButton(
-                text=f"{i}",
+                text=f"{i}) {name}",
                 callback_data=f"task_open_{hid}"
             )
         ])
 
-    kb.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="habits")
-    ])
+    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits")])
 
-    await c.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await c.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 
 @dp.callback_query(F.data.startswith("task_open_"))
@@ -2410,7 +2447,6 @@ async def task_open(c: CallbackQuery):
 
     kb = []
 
-    # 🔥 если НЕ выполнено → можно выполнить
     if not done_today:
         kb.append([
             InlineKeyboardButton(
@@ -2908,8 +2944,9 @@ async def reminder_worker(bot: Bot):
                     weekday_map = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
                     today = weekday_map[user_now.weekday()]
 
-                    if today not in days.split(","):
-                        continue
+                    if days:
+                        if today not in days.split(","):
+                            continue
 
                     # время привычки
                     hour, minute = map(int, time_str.split(":"))

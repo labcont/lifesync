@@ -12,6 +12,12 @@ class AddHabit(StatesGroup):
     days = State()
     time = State()
     reminder = State()  # ← ВОТ ЭТА СТРОКА
+    
+class AddTask(StatesGroup):
+    name = State()
+    time = State()
+    reminder = State()    
+    
 
 class Family(StatesGroup):
     create_password = State()
