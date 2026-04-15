@@ -15,8 +15,9 @@ class AddHabit(StatesGroup):
     
 class AddTask(StatesGroup):
     name = State()
+    date = State()   # 👈 ВОТ ЭТО ДОБАВЬ
     time = State()
-    reminder = State()    
+    reminder = State()  
     
 
 class Family(StatesGroup):
