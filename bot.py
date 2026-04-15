@@ -1815,32 +1815,6 @@ async def set_time(m: Message, state: FSMContext):
     data = await state.get_data()
 
     # =========================
-    # 🎯 ЕСЛИ ЭТО ЗАДАЧА
-    # =========================
-    if data.get("task_type") == "task":
-
-        # сначала парсим дату
-        text = m.text.strip()
-        match = re.match(r"(\d{1,2})[./, ](\d{1,2})", text)
-
-        if not match:
-            await m.answer("❌ Формат даты: 14.02")
-            return
-
-        d, mth = match.groups()
-        date = f"{int(d):02d}.{int(mth):02d}"
-
-        await state.update_data(days=date, time=None)
-
-        await state.set_state(AddHabit.reminder)
-
-        await m.answer(
-            "Напоминание?",
-            reply_markup=reminder_kb()
-        )
-        return
-
-    # =========================
     # 🏋️ ПРИВЫЧКА (КАК БЫЛО)
     # =========================
     if not re.match(r"^\d{2}:\d{2}$", m.text):
@@ -1916,24 +1890,17 @@ async def finish_habit_creation(c: CallbackQuery, state: FSMContext):
 async def set_task_type(c: CallbackQuery, state: FSMContext):
     await c.answer()
 
-    if "once" in c.data:
-        task_type = "task"   # 🔥 ВАЖНО
-    else:
-        task_type = "cycle"
+    # ❌ УБРАЛИ ВСЮ ЛОГИКУ once
+    task_type = "cycle"
 
     await state.update_data(task_type=task_type, days=[])
 
-    if task_type == "task":
-        await state.set_state(AddHabit.time)
-
-        # 👇 сразу спрашиваем дату текстом
-        await c.message.edit_text("📅 Введи дату (например 14.02)")
-    else:
-        await state.set_state(AddHabit.days)
-        await c.message.edit_text(
-            "Выбери дни",
-            reply_markup=get_days_kb([])
-        )
+    # ✅ ВСЕГДА ИДЁМ В ДНИ
+    await state.set_state(AddHabit.days)
+    await c.message.edit_text(
+        "Выбери дни",
+        reply_markup=get_days_kb([])
+    )
 
 # -------------------------
 # МОИ ПРИВЫЧКИ
@@ -2357,83 +2324,139 @@ async def choose_action(c: CallbackQuery):
 
 @dp.callback_query(F.data == "task_add")
 async def task_add(c: CallbackQuery, state: FSMContext):
-    await state.set_state("await_task_name")
+    await state.set_state("task_name")
     await c.message.answer("📝 Введи задачу:")
 
-@dp.message(StateFilter("await_task_name"))
-async def save_task(m: Message, state: FSMContext):
-    user_id = m.from_user.id
-    name = m.text.strip()
+@dp.message(StateFilter("task_name"))
+async def task_name(m: Message, state: FSMContext):
+    await state.update_data(name=m.text.strip())
+    await state.set_state("task_time")
 
-    if not name:
-        return await m.answer("Пусто")
+    await m.answer("⏰ Выбери время:", reply_markup=time_keyboard())
+    
+@dp.callback_query(StateFilter("task_time"), F.data.startswith("time_"))
+async def task_time(c: CallbackQuery, state: FSMContext):
+    time = c.data.replace("time_", "")
+    await state.update_data(time=time)
+
+    await state.set_state("task_reminder")
+
+    await c.message.edit_text(
+        "🔔 Напоминание?",
+        reply_markup=reminder_keyboard()
+    )    
+ 
+@dp.callback_query(StateFilter("task_reminder"))
+async def task_reminder(c: CallbackQuery, state: FSMContext):
+    reminder = int(c.data.replace("rem_", ""))
+
+    data = await state.get_data()
 
     add_habit(
-        user_id=user_id,
-        name=name,
+        user_id=c.from_user.id,
+        name=data["name"],
         days="",
-        h_type="solo",
-        time=None,
-        task_type="task"
+        h_type="personal",
+        time=data["time"],
+        task_type="task",
+        reminder=reminder
     )
 
     await state.clear()
-    await m.answer("✅ Задача добавлена")
+    await c.message.edit_text("✅ Задача создана")
+
+ 
 
 @dp.callback_query(F.data == "task_list")
 async def task_list(c: CallbackQuery):
     habits = get_habits(c.from_user.id)
-
     tasks = [h for h in habits if h[5] == "task"]
 
     if not tasks:
         return await c.answer("Нет задач", show_alert=True)
 
-    from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
-
-    text = "🗂 Задачи\n\nСписок задач:\n\n"
+    text = "🗂 Задачи\n\n"
     kb = []
 
     for i, h in enumerate(tasks, start=1):
-        habit_id, name, *_ = h
-
-        logs = get_habit_logs(habit_id, c.from_user.id)
-        done_today = any(d == date and s == "done" for d, s in logs)
-
-        status = "✅" if done_today else "⏳"
-
-        text += f"{i}) {name} {status}\n"
+        hid, name, *_ = h
+        text += f"{i}) {name}\n"
 
         kb.append([
             InlineKeyboardButton(
-                text=f"✅ {i}",
-                callback_data=f"task_done_{habit_id}"
-            ),
-            InlineKeyboardButton(
-                text=f"❌ {i}",
-                callback_data=f"task_del_{habit_id}"
+                text=f"{i}",
+                callback_data=f"task_open_{hid}"
             )
         ])
 
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="habits")
+    ])
+
+    await c.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@dp.callback_query(F.data.startswith("task_open_"))
+async def task_open(c: CallbackQuery):
+    hid = int(c.data.split("_")[2])
+
+    from datetime import datetime
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    logs = get_habit_logs(hid, c.from_user.id)
+    done_today = any(d == date and s == "done" for d, s in logs)
+
+    status = "✅ Выполнено" if done_today else "⏳ Ожидает"
+
+    kb = []
+
+    # 🔥 если НЕ выполнено → можно выполнить
+    if not done_today:
+        kb.append([
+            InlineKeyboardButton(
+                text="✅ Выполнить",
+                callback_data=f"task_done_{hid}"
+            )
+        ])
+
+    kb.append([
+        InlineKeyboardButton(
+            text="❌ Удалить",
+            callback_data=f"task_del_{hid}"
+        )
+    ])
+
+    kb.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="task_list"
+        )
+    ])
+
     await c.message.edit_text(
-        text,
+        f"📝 Задача\n\nСтатус: {status}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
 
 @dp.callback_query(F.data.startswith("task_done_"))
 async def task_done(c: CallbackQuery):
-    habit_id = int(c.data.split("_")[2])
+    hid = int(c.data.split("_")[2])
     user_id = c.from_user.id
 
     from datetime import datetime
     date = datetime.now().strftime("%Y-%m-%d")
 
-    add_habit_log(habit_id, user_id, date, "done")
+    logs = get_habit_logs(hid, user_id)
+    already_done = any(d == date and s == "done" for d, s in logs)
+
+    if already_done:
+        return await c.answer("Уже выполнено", show_alert=True)
+
+    add_habit_log(hid, user_id, date, "done")
 
     await c.answer("✅ Выполнено")
-    await task_list(c)
+    await task_open(c)
 
 
 @dp.callback_query(F.data.startswith("task_del_"))
