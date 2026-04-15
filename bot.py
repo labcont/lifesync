@@ -2361,13 +2361,27 @@ async def task_select_minute(c: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(AddTask.time, F.data == "skip_time")
 async def task_skip_time(c: CallbackQuery, state: FSMContext):
-    await state.update_data(time=None)
-    await state.set_state(AddTask.reminder)
+    await c.answer()
 
-    await c.message.edit_text(
-        "🔔 Напоминание?",
-        reply_markup=reminder_kb()
+    data = await state.get_data()
+
+    # ❗ СОЗДАЕМ СРАЗУ
+    add_habit(
+        user_id=c.from_user.id,
+        name=data["name"],
+        days="",
+        h_type="personal",
+        time=None,
+        task_type="task",
+        reminder=None
     )
+
+    await state.clear()
+
+    await c.message.edit_text("✅ Задача создана")
+
+    # 🔥 ВАЖНО — открываем меню как у привычек
+    await show_my_habits(c)
 
 
 @dp.callback_query(AddTask.reminder, F.data.startswith("rem_"))
@@ -2392,6 +2406,8 @@ async def task_set_reminder(c: CallbackQuery, state: FSMContext):
     await state.clear()
 
     await c.message.edit_text("✅ Задача создана")
+
+    await show_my_habits(c)
 
  
 
@@ -2423,29 +2439,7 @@ async def task_list(c: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
-@dp.callback_query(StateFilter(AddTask.time), F.data == "skip_time")
-async def task_skip_time(c: CallbackQuery, state: FSMContext):
-    await c.answer()
 
-    # ❗ сразу создаём без времени и напоминаний
-    data = await state.get_data()
-
-    add_habit(
-        user_id=c.from_user.id,
-        name=data["name"],
-        days="",
-        h_type="personal",
-        time=None,
-        task_type="task",
-        reminder=None
-    )
-
-    await state.clear()
-
-    await c.message.edit_text(
-        "✅ Задача создана",
-        reply_markup=keyboards.habits_menu()
-    )
 
 
 
@@ -2501,7 +2495,7 @@ async def task_done(c: CallbackQuery):
 
     logs = get_habit_logs(hid, user_id)
 
-    already_done = any(d == date and s == "done" for d, s in logs)
+    already_done = any(l[0] == date and l[1] == "done" for l in logs)
 
     if already_done:
         return await c.answer("Уже выполнено", show_alert=True)
@@ -2658,12 +2652,11 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     today = now.strftime("%Y-%m-%d")
 
     # =========================
-    # 🔁 ПРИВЫЧКИ (БЕЗ ЗАДАЧ)
+    # 🔁 ПРИВЫЧКИ
     # =========================
     for h in habits:
         hid, name, days, h_type, time, task_type, reminder = h
 
-        # ❗ ПРОПУСКАЕМ ЗАДАЧИ
         if task_type == "task":
             continue
 
@@ -2673,7 +2666,10 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             continue
 
         order = {day: i for i, day in enumerate(DAYS)}
-        days_list = sorted(days.split(","), key=lambda x: order[x])
+
+        # ✅ FIX от пустых дней
+        days_list = [d for d in days.split(",") if d]
+        days_list = sorted(days_list, key=lambda x: order[x])
 
         active_users = [c.from_user.id] if h_type == "personal" else users
 
@@ -2691,8 +2687,15 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             user_logs[uid] = log_map
 
-        labels_line = "|".join(days_list)
+        # ===== ДНИ (как в привычках) =====
+        labels_line = ""
+        for i, d in enumerate(days_list):
+            labels_line += d + " "
+            if i == 2:
+                labels_line += " "
+        labels_line = labels_line.strip()
 
+        # ===== БАР (С ПРОБЕЛАМИ) =====
         if h_type == "personal":
             bar_line = ""
 
@@ -2708,7 +2711,9 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 else:
                     block = "⬜"
 
-                bar_line += block
+                bar_line += block + " "
+
+            bar_line = bar_line.strip()
 
             streak = get_streak(hid, c.from_user.id)
             if streak > 0:
@@ -2732,9 +2737,9 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                     else:
                         block = "⬜"
 
-                    row += block
+                    row += block + " "
 
-                rows.append(row)
+                rows.append(row.strip())
 
             bar_line = "\n".join(rows)
 
@@ -2742,9 +2747,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             if streak > 0:
                 bar_line = f"{bar_line}{streak}🔥"
 
-        title = name
-        if time:
-            title = f"{name} ({time})"
+        title = f"{name} ({time})" if time else name
 
         text += (
             f"🔹 <b><i>{title}</i></b>\n"
@@ -2754,7 +2757,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         )
 
     # =========================
-    # 📝 ЗАДАЧИ (ДОБАВИЛИ)
+    # 📝 ЗАДАЧИ (НОРМ ЛОГИКА)
     # =========================
     tasks = [h for h in habits if h[5] == "task"]
 
@@ -2766,9 +2769,20 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             hid, name, *_ = h
 
             logs = get_habit_logs(hid, c.from_user.id)
-            done_today = any(d == today and s == "done" for d, s in logs)
 
-            status = "✅" if done_today else "⏳"
+            # ✅ фильтр по периоду
+            filtered = []
+            for d, s in logs:
+                try:
+                    date = datetime.strptime(d, "%Y-%m-%d")
+                    if date >= start_date:
+                        filtered.append((d, s))
+                except:
+                    continue
+
+            done = any(s == "done" for _, s in filtered)
+
+            status = "✅" if done else "⏳"
 
             text += f"{idx}) {name} {status}\n"
             idx += 1
