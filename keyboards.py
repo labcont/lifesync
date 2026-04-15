@@ -60,8 +60,10 @@ def savings_menu():
 
 def habits_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить", callback_data="habit_add")],
-        [InlineKeyboardButton(text="⚙️ Управление задачами", callback_data="habit_list")],
+        [InlineKeyboardButton(text="➕ Привычка", callback_data="habit_add")],
+        [InlineKeyboardButton(text="📝 Задача", callback_data="task_add")],
+        [InlineKeyboardButton(text="⚙️ Привычки", callback_data="habit_list")],
+        [InlineKeyboardButton(text="🗂 Задачи", callback_data="task_list")],
         [InlineKeyboardButton(text="📊 Прогресс", callback_data="habit_progress")],
     ])
 

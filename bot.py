@@ -2352,6 +2352,104 @@ async def choose_action(c: CallbackQuery):
 
 
 # -------------------------
+# Задачи
+# -------------------------
+
+@dp.callback_query(F.data == "task_add")
+async def task_add(c: CallbackQuery, state: FSMContext):
+    await state.set_state("await_task_name")
+    await c.message.answer("📝 Введи задачу:")
+
+@dp.message(StateFilter("await_task_name"))
+async def save_task(m: Message, state: FSMContext):
+    user_id = m.from_user.id
+    name = m.text.strip()
+
+    if not name:
+        return await m.answer("Пусто")
+
+    add_habit(
+        user_id=user_id,
+        name=name,
+        days="",
+        h_type="solo",
+        time=None,
+        task_type="task"
+    )
+
+    await state.clear()
+    await m.answer("✅ Задача добавлена")
+
+@dp.callback_query(F.data == "task_list")
+async def task_list(c: CallbackQuery):
+    habits = get_habits(c.from_user.id)
+
+    tasks = [h for h in habits if h[5] == "task"]
+
+    if not tasks:
+        return await c.answer("Нет задач", show_alert=True)
+
+    from datetime import datetime
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    text = "🗂 Задачи\n\nСписок задач:\n\n"
+    kb = []
+
+    for i, h in enumerate(tasks, start=1):
+        habit_id, name, *_ = h
+
+        logs = get_habit_logs(habit_id, c.from_user.id)
+        done_today = any(d == date and s == "done" for d, s in logs)
+
+        status = "✅" if done_today else "⏳"
+
+        text += f"{i}) {name} {status}\n"
+
+        kb.append([
+            InlineKeyboardButton(
+                text=f"✅ {i}",
+                callback_data=f"task_done_{habit_id}"
+            ),
+            InlineKeyboardButton(
+                text=f"❌ {i}",
+                callback_data=f"task_del_{habit_id}"
+            )
+        ])
+
+    await c.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+@dp.callback_query(F.data.startswith("task_done_"))
+async def task_done(c: CallbackQuery):
+    habit_id = int(c.data.split("_")[2])
+    user_id = c.from_user.id
+
+    from datetime import datetime
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    add_habit_log(habit_id, user_id, date, "done")
+
+    await c.answer("✅ Выполнено")
+    await task_list(c)
+
+
+@dp.callback_query(F.data.startswith("task_del_"))
+async def task_delete(c: CallbackQuery):
+    habit_id = int(c.data.split("_")[2])
+
+    delete_habit(habit_id)
+
+    await c.answer("❌ Удалено")
+    await task_list(c)
+
+
+
+
+
+# -------------------------
 # ПРОГРЕСС
 # -------------------------
 @dp.callback_query(F.data == "habit_progress")
@@ -2483,8 +2581,15 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
     today = now.strftime("%Y-%m-%d")
 
+    # =========================
+    # 🔁 ПРИВЫЧКИ (БЕЗ ЗАДАЧ)
+    # =========================
     for h in habits:
         hid, name, days, h_type, time, task_type, reminder = h
+
+        # ❗ ПРОПУСКАЕМ ЗАДАЧИ
+        if task_type == "task":
+            continue
 
         if mode == "personal" and h_type != "personal":
             continue
@@ -2510,10 +2615,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             user_logs[uid] = log_map
 
-        # =========================
-        # 🔥 РОВНАЯ ВЕРСТКА
-        # =========================
-
         labels_line = "|".join(days_list)
 
         if h_type == "personal":
@@ -2533,7 +2634,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
                 bar_line += block
 
-            # ✅ СТРИК
             streak = get_streak(hid, c.from_user.id)
             if streak > 0:
                 bar_line = f"{bar_line}{streak}🔥"
@@ -2562,7 +2662,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             bar_line = "\n".join(rows)
 
-            # ✅ СТРИК
             streak = get_streak(hid, c.from_user.id)
             if streak > 0:
                 bar_line = f"{bar_line}{streak}🔥"
@@ -2578,6 +2677,29 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             f"───────────────\n"
         )
 
+    # =========================
+    # 📝 ЗАДАЧИ (ДОБАВИЛИ)
+    # =========================
+    tasks = [h for h in habits if h[5] == "task"]
+
+    if tasks:
+        text += "\n📝 <b>Задачи:</b>\n\n"
+
+        idx = 1
+        for h in tasks:
+            hid, name, *_ = h
+
+            logs = get_habit_logs(hid, c.from_user.id)
+            done_today = any(d == today and s == "done" for d, s in logs)
+
+            status = "✅" if done_today else "⏳"
+
+            text += f"{idx}) {name} {status}\n"
+            idx += 1
+
+    # =========================
+    # КНОПКИ
+    # =========================
     if mode == "personal":
         kb.append([InlineKeyboardButton(text="👥 Общие", callback_data="progress_family")])
     else:
