@@ -1920,24 +1920,28 @@ async def render_habits(user_id):
     today = datetime.now().strftime("%Y-%m-%d")
 
     # =========================
-    # 🏋️ ПРИВЫЧКИ (КАК БЫЛО)
+    # 🏋️ ПРИВЫЧКИ
     # =========================
     for h in habits:
         hid, name, days, h_type, time, task_type, reminder = h
 
-        # 🔥 ВАЖНО — ПРОПУСКАЕМ ЗАДАЧИ
         if task_type == "task":
             continue
 
         order = {day: i for i, day in enumerate(DAYS)}
-        days_list = sorted(days.split(","), key=lambda x: order[x])
-        logs = get_habit_logs(hid, user_id)
 
-        log_map = {}
-        for l in logs:
-            log_map[l[0]] = l[1]
+        # ✅ FIX: убираем пустые дни
+        days_list = [d for d in days.split(",") if d]
+        days_list = sorted(days_list, key=lambda x: order[x])
 
-        # ===== БАР (ТОЛЬКО 1 ПРОБЕЛ) =====
+        # ✅ FIX: только сегодня (обновление бара)
+        logs = [
+            l for l in get_habit_logs(hid, user_id)
+            if l[0].startswith(today)
+        ]
+
+        log_map = {l[0]: l[1] for l in logs}
+
         bar = ""
         for d in days_list:
             key = today + "_" + d
@@ -1954,18 +1958,14 @@ async def render_habits(user_id):
 
         bar = bar.strip()
 
-        # ===== ДНИ (С ДОП ПРОБЕЛОМ ПОСЛЕ 3) =====
         labels = ""
         for i, d in enumerate(days_list):
             labels += d + " "
             if i == 2:
                 labels += " "
-
         labels = labels.strip()
 
-        title = name
-        if time:
-            title = f"{name} ({time})"
+        title = f"{name} ({time})" if time else name
 
         text += (
             f"🔹 <b><i>{title}</i></b>\n"
@@ -1980,7 +1980,7 @@ async def render_habits(user_id):
             ])
 
     # =========================
-    # 🎯 ЗАДАЧИ (НОВОЕ)
+    # 🎯 ЗАДАЧИ
     # =========================
     cur.execute("""
         SELECT rowid, name, days, time
@@ -1995,7 +1995,17 @@ async def render_habits(user_id):
 
     for tid, name, date, time in tasks:
 
-        # проверка выполнена ли
+        # ✅ FIX: скрываем старые задачи
+        if date:
+            try:
+                task_date = datetime.strptime(date, "%d.%m")
+                now = datetime.now()
+
+                if task_date.replace(year=now.year) < now:
+                    continue
+            except:
+                pass
+
         cur.execute("""
             SELECT 1 FROM habit_logs
             WHERE habit_id=? AND user_id=? AND status='done'
@@ -2003,9 +2013,7 @@ async def render_habits(user_id):
 
         done = cur.fetchone()
 
-        title = name
-        if time:
-            title = f"{name} ({time})"
+        title = f"{name} ({time})" if time else name
 
         if done:
             text += f"<s>• {title}</s> ({date})\n"
@@ -2016,13 +2024,13 @@ async def render_habits(user_id):
             ])
 
     # =========================
-    # 🌅 МАГИЯ УТРА (НЕ ТРОГАЕМ)
+    # 🌅 МАГИЯ УТРА
     # =========================
     cur.execute("SELECT morning_enabled FROM users WHERE id=?", (user_id,))
     res = cur.fetchone()
 
     if res and res[0] == 1:
-        progress = get_morning_progress(user_id, today)
+        progress = get_morning_progress(user_id)
 
         text += (
             f"\n🌅 <b>Магия утра</b>\n"
@@ -2051,31 +2059,37 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
     for h in habits:
         hid, name, days, h_type, time, task_type, reminder = h
 
+        if task_type == "task":
+            continue
+
         if mode == "personal" and h_type != "personal":
             continue
         if mode == "family" and h_type != "family":
             continue
 
         order = {day: i for i, day in enumerate(DAYS)}
-        days_list = sorted(days.split(","), key=lambda x: order[x])
+
+        # ✅ FIX
+        days_list = [d for d in days.split(",") if d]
+        days_list = sorted(days_list, key=lambda x: order[x])
 
         active_users = [c.from_user.id] if h_type == "personal" else users
 
         user_logs = {}
         for uid in active_users:
-            logs = get_habit_logs(hid, uid)
+            logs = [
+                l for l in get_habit_logs(hid, uid)
+                if l[0].startswith(today)
+            ]
             user_logs[uid] = {l[0]: l[1] for l in logs}
 
-        # ===== ДНИ (доп пробел после 3) =====
         labels_line = ""
         for i, d in enumerate(days_list):
             labels_line += d + " "
             if i == 2:
                 labels_line += " "
-
         labels_line = labels_line.strip()
 
-        # ===== БАР (обычные пробелы) =====
         if h_type == "personal":
             bar_line = ""
 
@@ -2127,23 +2141,7 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
             if streak > 0:
                 bar_line = f"{bar_line}{streak}🔥"
 
-        yesterday_done = True
-        for d in days_list:
-            key = yesterday + "_" + d
-            for uid in active_users:
-                log_map = user_logs.get(uid, {})
-                if key not in log_map or log_map[key] != "done":
-                    yesterday_done = False
-
-        if yesterday_done:
-            continue
-
-        title = name
-        if time:
-            title = f"{name} ({time})"
-
-        if "⬜" not in bar_line:
-            title = f"<s>{title}</s>"
+        title = f"{name} ({time})" if time else name
 
         text += (
             f"🔹 <b><i>{title}</i></b>\n"
@@ -2164,18 +2162,11 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
 
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits")])
 
-    try:
-        await c.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-            parse_mode="HTML"
-        )
-    except:
-        await c.message.answer(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-            parse_mode="HTML"
-        )
+    await c.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+        parse_mode="HTML"
+    )
 
 @dp.callback_query(F.data == "habit_list")
 async def habit_list(c: CallbackQuery):
@@ -2432,6 +2423,31 @@ async def task_list(c: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
+@dp.callback_query(StateFilter(AddTask.time), F.data == "skip_time")
+async def task_skip_time(c: CallbackQuery, state: FSMContext):
+    await c.answer()
+
+    # ❗ сразу создаём без времени и напоминаний
+    data = await state.get_data()
+
+    add_habit(
+        user_id=c.from_user.id,
+        name=data["name"],
+        days="",
+        h_type="personal",
+        time=None,
+        task_type="task",
+        reminder=None
+    )
+
+    await state.clear()
+
+    await c.message.edit_text(
+        "✅ Задача создана",
+        reply_markup=keyboards.habits_menu()
+    )
+
+
 
 @dp.callback_query(F.data.startswith("task_open_"))
 async def task_open(c: CallbackQuery):
@@ -2484,6 +2500,7 @@ async def task_done(c: CallbackQuery):
     date = datetime.now().strftime("%Y-%m-%d")
 
     logs = get_habit_logs(hid, user_id)
+
     already_done = any(d == date and s == "done" for d, s in logs)
 
     if already_done:
