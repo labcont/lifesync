@@ -73,7 +73,7 @@ async def set_timezone(c: CallbackQuery, state: FSMContext):
     tz = int(c.data.split("_")[1])
     data = await state.get_data()
 
-    # =========================
+    # ========================
     # 🔥 СТАРТ (НЕ ТРОГАЕМ)
     # =========================
     if "name" in data:
