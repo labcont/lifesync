@@ -1919,6 +1919,8 @@ async def render_habits(user_id):
     from datetime import datetime
     today = datetime.now().strftime("%Y-%m-%d")
 
+    week_dates = get_current_week_dates()
+
     # =========================
     # 🏋️ ПРИВЫЧКИ
     # =========================
@@ -1930,21 +1932,17 @@ async def render_habits(user_id):
 
         order = {day: i for i, day in enumerate(DAYS)}
 
-        # ✅ FIX: убираем пустые дни
         days_list = [d for d in days.split(",") if d]
         days_list = sorted(days_list, key=lambda x: order[x])
 
-        # ✅ FIX: только сегодня (обновление бара)
-        logs = [
-            l for l in get_habit_logs(hid, user_id)
-            if l[0].startswith(today)
-        ]
-
+        logs = get_habit_logs(hid, user_id)
         log_map = {l[0]: l[1] for l in logs}
 
         bar = ""
         for d in days_list:
-            key = today + "_" + d
+            date_index = DAYS.index(d)
+            date = week_dates[date_index]
+            key = date + "_" + d
 
             if key in log_map:
                 if log_map[key] == "done":
@@ -1995,17 +1993,6 @@ async def render_habits(user_id):
 
     for tid, name, date, time in tasks:
 
-        # ✅ FIX: скрываем старые задачи
-        if date:
-            try:
-                task_date = datetime.strptime(date, "%d.%m")
-                now = datetime.now()
-
-                if task_date.replace(year=now.year) < now:
-                    continue
-            except:
-                pass
-
         cur.execute("""
             SELECT 1 FROM habit_logs
             WHERE habit_id=? AND user_id=? AND status='done'
@@ -2049,9 +2036,10 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
     habits = get_habits(c.from_user.id)
     users = get_family_members(c.from_user.id)
 
-    from datetime import datetime, timedelta
+    from datetime import datetime
     today = datetime.now().strftime("%Y-%m-%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    week_dates = get_current_week_dates()
 
     text = "📋 <b>Мои привычки</b>\n\n"
     kb = []
@@ -2069,7 +2057,6 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
 
         order = {day: i for i, day in enumerate(DAYS)}
 
-        # ✅ FIX
         days_list = [d for d in days.split(",") if d]
         days_list = sorted(days_list, key=lambda x: order[x])
 
@@ -2077,10 +2064,7 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
 
         user_logs = {}
         for uid in active_users:
-            logs = [
-                l for l in get_habit_logs(hid, uid)
-                if l[0].startswith(today)
-            ]
+            logs = get_habit_logs(hid, uid)
             user_logs[uid] = {l[0]: l[1] for l in logs}
 
         labels_line = ""
@@ -2094,7 +2078,10 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
             bar_line = ""
 
             for d in days_list:
-                key = today + "_" + d
+                date_index = DAYS.index(d)
+                date = week_dates[date_index]
+                key = date + "_" + d
+
                 log_map = user_logs.get(c.from_user.id, {})
 
                 if key in log_map:
@@ -2121,7 +2108,9 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
                 log_map = user_logs.get(uid, {})
 
                 for d in days_list:
-                    key = today + "_" + d
+                    date_index = DAYS.index(d)
+                    date = week_dates[date_index]
+                    key = date + "_" + d
 
                     if key in log_map:
                         if log_map[key] == "done":
@@ -2252,7 +2241,8 @@ async def choose_action(c: CallbackQuery):
     if not habit:
         return
 
-    days = habit[2].split(",")
+    # ✅ FIX: убираем пустые дни
+    days = [d for d in habit[2].split(",") if d]
 
     # ✅ если 1 день
     if len(days) == 1:
@@ -2262,7 +2252,10 @@ async def choose_action(c: CallbackQuery):
         today = datetime.now().strftime("%Y-%m-%d")
         key = today + "_" + day
 
-        logs = get_habit_logs(hid, c.from_user.id)
+        logs = [
+            l for l in get_habit_logs(hid, c.from_user.id)
+            if l[0].startswith(today)
+        ]
 
         for l in logs:
             if l[0] == key:
@@ -2281,17 +2274,19 @@ async def choose_action(c: CallbackQuery):
         return
 
     # --- стандарт ---
-    logs = get_habit_logs(hid, c.from_user.id)
-
     from datetime import datetime
     today = datetime.now().strftime("%Y-%m-%d")
+
+    logs = [
+        l for l in get_habit_logs(hid, c.from_user.id)
+        if l[0].startswith(today)
+    ]
 
     used_days = set()
 
     for log_date, status in logs:
-        if log_date.startswith(today):
-            day = log_date.split("_")[1]
-            used_days.add(day)
+        day = log_date.split("_")[1]
+        used_days.add(day)
 
     kb = []
 
@@ -2306,7 +2301,10 @@ async def choose_action(c: CallbackQuery):
 
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habit_list")])
 
-    await c.message.edit_text("Выбери день:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await c.message.edit_text(
+        "Выбери день:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 
 # -------------------------
@@ -2327,10 +2325,21 @@ async def task_name(m: Message, state: FSMContext):
         return await m.answer("Пусто")
 
     await state.update_data(name=name)
+    await state.set_state(AddTask.date)
+
+    await m.answer("📅 Введи дату (пример: 14.02 / 14 02 / 14/02 / 14.02.2026)")
+
+@dp.message(AddTask.date)
+async def task_date(m: Message, state: FSMContext):
+    parsed = parse_date(m.text)
+
+    if not parsed:
+        return await m.answer("❌ Неверный формат даты")
+
+    await state.update_data(date=parsed)
     await state.set_state(AddTask.time)
 
     await m.answer("⏰ Выбери час:", reply_markup=get_hours_kb())
-
 
 @dp.callback_query(AddTask.time, F.data.startswith("hour_"))
 async def task_select_hour(c: CallbackQuery, state: FSMContext):
@@ -2361,15 +2370,12 @@ async def task_select_minute(c: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(AddTask.time, F.data == "skip_time")
 async def task_skip_time(c: CallbackQuery, state: FSMContext):
-    await c.answer()
-
     data = await state.get_data()
 
-    # ❗ СОЗДАЕМ СРАЗУ
     add_habit(
         user_id=c.from_user.id,
         name=data["name"],
-        days="",
+        days=data["date"],
         h_type="personal",
         time=None,
         task_type="task",
@@ -2378,10 +2384,10 @@ async def task_skip_time(c: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
-    await c.message.edit_text("✅ Задача создана")
-
-    # 🔥 ВАЖНО — открываем меню как у привычек
-    await show_my_habits(c)
+    await c.message.edit_text(
+        "✅ Задача создана",
+        reply_markup=keyboards.habits_menu()
+    )
 
 
 @dp.callback_query(AddTask.reminder, F.data.startswith("rem_"))
@@ -2396,7 +2402,7 @@ async def task_set_reminder(c: CallbackQuery, state: FSMContext):
     add_habit(
         user_id=c.from_user.id,
         name=data["name"],
-        days="",
+        days=data["date"],  # 👈 ВАЖНО
         h_type="personal",
         time=data.get("time"),
         task_type="task",
@@ -2405,9 +2411,10 @@ async def task_set_reminder(c: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
-    await c.message.edit_text("✅ Задача создана")
-
-    await show_my_habits(c)
+    await c.message.edit_text(
+        "✅ Задача создана",
+        reply_markup=keyboards.habits_menu()
+    )
 
  
 
@@ -2530,6 +2537,40 @@ async def habit_progress(c: CallbackQuery):
         await c.message.answer("Ошибка открытия прогресса")
 
 
+def get_current_week_dates():
+    from datetime import datetime, timedelta
+
+    today = datetime.now()
+    start = today - timedelta(days=today.weekday())  # понедельник
+
+    week = []
+    for i in range(7):
+        d = start + timedelta(days=i)
+        week.append(d.strftime("%Y-%m-%d"))
+
+    return week
+
+def parse_date(text: str):
+    from datetime import datetime
+
+    text = text.strip().replace("/", ".").replace(" ", ".")
+
+    parts = text.split(".")
+
+    try:
+        if len(parts) == 2:
+            day, month = parts
+            year = datetime.now().year
+        elif len(parts) == 3:
+            day, month, year = parts
+        else:
+            return None
+
+        date = datetime(int(year), int(month), int(day))
+        return date.strftime("%Y-%m-%d")
+
+    except:
+        return None
 # -------------------------
 # ACTIONS (done / skip / delete)
 # -------------------------
@@ -2595,13 +2636,11 @@ def get_family_members(user_id):
 @dp.callback_query(F.data.startswith("done_"))
 async def habit_done(c: CallbackQuery):
 
-    # ❗ ЖЕСТКО ИСКЛЮЧАЕМ done_plan
     if c.data == "done_plan":
         return
 
     parts = c.data.split("_")
 
-    # ✅ ЗАЩИТА
     if len(parts) != 3:
         return
 
@@ -2616,7 +2655,10 @@ async def habit_done(c: CallbackQuery):
     today = datetime.now().strftime("%Y-%m-%d")
     key = today + "_" + day
 
-    logs = get_habit_logs(hid, c.from_user.id)
+    logs = [
+        l for l in get_habit_logs(hid, c.from_user.id)
+        if l[0].startswith(today)
+    ]
 
     for l in logs:
         if l[0] == key:
@@ -2847,9 +2889,9 @@ async def habit_skip(c: CallbackQuery):
     _, hid, day = c.data.split("_")
     hid = int(hid)
 
-    from datetime import datetime
-    today = datetime.now().strftime("%Y-%m-%d")
-    key = today + "_" + day
+    week_dates = get_current_week_dates()
+    date = week_dates[DAYS.index(day)]
+    key = date + "_" + day
 
     logs = get_habit_logs(hid, c.from_user.id)
 
