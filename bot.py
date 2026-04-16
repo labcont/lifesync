@@ -171,6 +171,28 @@ async def set_name_settings(m: Message, state: FSMContext):
         reply_markup=keyboards.settings_menu()
     )
 
+def normalize_date(text):
+    import re
+    from datetime import datetime
+
+    nums = re.findall(r"\d+", text)
+
+    if len(nums) < 2:
+        return None
+
+    day = int(nums[0])
+    month = int(nums[1])
+
+    year = datetime.now().year
+    if len(nums) >= 3:
+        year = int(nums[2])
+
+    try:
+        dt = datetime(year, month, day)
+        return dt.strftime("%Y-%m-%d")  # 🔥 ЕДИНЫЙ ФОРМАТ
+    except:
+        return None
+
 
 def lock_user_input(user_id):
     USER_INPUT_LOCK[user_id] = time.time()
@@ -1942,6 +1964,7 @@ async def render_habits(user_id):
         for d in days_list:
             date_index = DAYS.index(d)
             date = week_dates[date_index]
+
             key = date + "_" + d
 
             if key in log_map:
@@ -1991,7 +2014,24 @@ async def render_habits(user_id):
     if tasks:
         text += "\n🎯 <b>Задачи</b>\n\n"
 
+    from datetime import datetime
+
     for tid, name, date, time in tasks:
+
+        date_str = ""
+        if date:
+            try:
+                date_str = datetime.strptime(date, "%Y-%m-%d").strftime("%d.%m")
+            except:
+                date_str = date
+
+        if date:
+            try:
+                task_date = datetime.strptime(date, "%Y-%m-%d")
+                if task_date < datetime.now():
+                    continue
+            except:
+                pass
 
         cur.execute("""
             SELECT 1 FROM habit_logs
@@ -2003,9 +2043,9 @@ async def render_habits(user_id):
         title = f"{name} ({time})" if time else name
 
         if done:
-            text += f"<s>• {title}</s> ({date})\n"
+            text += f"<s>• {title}</s> ({date_str})\n"
         else:
-            text += f"• {title} ({date})\n"
+            text += f"• {title} ({date_str})\n"
             kb.append([
                 InlineKeyboardButton(text=name, callback_data=f"open_{tid}")
             ])
@@ -2037,8 +2077,6 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
     users = get_family_members(c.from_user.id)
 
     from datetime import datetime
-    today = datetime.now().strftime("%Y-%m-%d")
-
     week_dates = get_current_week_dates()
 
     text = "📋 <b>Мои привычки</b>\n\n"
@@ -2080,8 +2118,8 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
             for d in days_list:
                 date_index = DAYS.index(d)
                 date = week_dates[date_index]
-                key = date + "_" + d
 
+                key = date + "_" + d
                 log_map = user_logs.get(c.from_user.id, {})
 
                 if key in log_map:
@@ -2096,10 +2134,6 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
 
             bar_line = bar_line.strip()
 
-            streak = get_streak(hid, c.from_user.id)
-            if streak > 0:
-                bar_line = f"{bar_line}{streak}🔥"
-
         else:
             rows = []
 
@@ -2110,6 +2144,7 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
                 for d in days_list:
                     date_index = DAYS.index(d)
                     date = week_dates[date_index]
+
                     key = date + "_" + d
 
                     if key in log_map:
@@ -2125,10 +2160,6 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
                 rows.append(row.strip())
 
             bar_line = "\n".join(rows)
-
-            streak = get_streak(hid, c.from_user.id)
-            if streak > 0:
-                bar_line = f"{bar_line}{streak}🔥"
 
         title = f"{name} ({time})" if time else name
 
@@ -2228,7 +2259,6 @@ async def choose_action(c: CallbackQuery):
 
     habit = None
 
-    # 🔥 ищем привычку у всех
     for uid in users:
         habits = get_habits(uid)
         for h in habits:
@@ -2241,21 +2271,20 @@ async def choose_action(c: CallbackQuery):
     if not habit:
         return
 
-    # ✅ FIX: убираем пустые дни
     days = [d for d in habit[2].split(",") if d]
 
-    # ✅ если 1 день
+    from datetime import datetime
+    week_dates = get_current_week_dates()
+
     if len(days) == 1:
-        day = days[0]
+        d = days[0]
 
-        from datetime import datetime
-        today = datetime.now().strftime("%Y-%m-%d")
-        key = today + "_" + day
+        date_index = DAYS.index(d)
+        date = week_dates[date_index]
 
-        logs = [
-            l for l in get_habit_logs(hid, c.from_user.id)
-            if l[0].startswith(today)
-        ]
+        key = date + "_" + d
+
+        logs = get_habit_logs(hid, c.from_user.id)
 
         for l in logs:
             if l[0] == key:
@@ -2273,20 +2302,15 @@ async def choose_action(c: CallbackQuery):
         await show_my_habits(c, mode=mode)
         return
 
-    # --- стандарт ---
-    from datetime import datetime
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    logs = [
-        l for l in get_habit_logs(hid, c.from_user.id)
-        if l[0].startswith(today)
-    ]
+    logs = get_habit_logs(hid, c.from_user.id)
 
     used_days = set()
-
     for log_date, status in logs:
-        day = log_date.split("_")[1]
-        used_days.add(day)
+        for d in days:
+            date_index = DAYS.index(d)
+            date = week_dates[date_index]
+            if log_date == date + "_" + d:
+                used_days.add(d)
 
     kb = []
 
@@ -2301,10 +2325,7 @@ async def choose_action(c: CallbackQuery):
 
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habit_list")])
 
-    await c.message.edit_text(
-        "Выбери день:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-    )
+    await c.message.edit_text("Выбери день:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 # -------------------------
@@ -2331,15 +2352,15 @@ async def task_name(m: Message, state: FSMContext):
 
 @dp.message(AddTask.date)
 async def task_date(m: Message, state: FSMContext):
-    parsed = parse_date(m.text)
+    date = normalize_date(m.text)
 
-    if not parsed:
-        return await m.answer("❌ Неверный формат даты")
+    if not date:
+        return await m.answer("❌ Неверный формат даты\nПример: 14.02 / 14 02 / 14/02")
 
-    await state.update_data(date=parsed)
+    await state.update_data(date=date)
     await state.set_state(AddTask.time)
 
-    await m.answer("⏰ Выбери час:", reply_markup=get_hours_kb())
+    await m.answer("⏰ Выбери время:", reply_markup=get_hours_kb())
 
 @dp.callback_query(AddTask.time, F.data.startswith("hour_"))
 async def task_select_hour(c: CallbackQuery, state: FSMContext):
@@ -2402,7 +2423,7 @@ async def task_set_reminder(c: CallbackQuery, state: FSMContext):
     add_habit(
         user_id=c.from_user.id,
         name=data["name"],
-        days=data["date"],  # 👈 ВАЖНО
+        days=data.get("date"),  # 🔥 ТЕПЕРЬ YYYY-MM-DD
         h_type="personal",
         time=data.get("time"),
         task_type="task",
@@ -2413,7 +2434,7 @@ async def task_set_reminder(c: CallbackQuery, state: FSMContext):
 
     await c.message.edit_text(
         "✅ Задача создана",
-        reply_markup=keyboards.habits_menu()
+        reply_markup=keyboards.habits_menu()  # ✅ FIX
     )
 
  
@@ -2640,7 +2661,6 @@ async def habit_done(c: CallbackQuery):
         return
 
     parts = c.data.split("_")
-
     if len(parts) != 3:
         return
 
@@ -2651,14 +2671,14 @@ async def habit_done(c: CallbackQuery):
     except:
         return
 
-    from datetime import datetime
-    today = datetime.now().strftime("%Y-%m-%d")
-    key = today + "_" + day
+    week_dates = get_current_week_dates()
 
-    logs = [
-        l for l in get_habit_logs(hid, c.from_user.id)
-        if l[0].startswith(today)
-    ]
+    date_index = DAYS.index(day)
+    date = week_dates[date_index]
+
+    key = date + "_" + day
+
+    logs = get_habit_logs(hid, c.from_user.id)
 
     for l in logs:
         if l[0] == key:
@@ -2890,7 +2910,10 @@ async def habit_skip(c: CallbackQuery):
     hid = int(hid)
 
     week_dates = get_current_week_dates()
-    date = week_dates[DAYS.index(day)]
+
+    date_index = DAYS.index(day)
+    date = week_dates[date_index]
+
     key = date + "_" + day
 
     logs = get_habit_logs(hid, c.from_user.id)
