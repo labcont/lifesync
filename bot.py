@@ -2060,7 +2060,7 @@ async def render_habits(user_id):
         else:
             text += f"• {title}\n"
             kb.append([
-                InlineKeyboardButton(text=name, callback_data=f"open_{tid}")
+                InlineKeyboardButton(text=name, callback_data=f"task_open_{tid}")
             ])
 
     # =========================
