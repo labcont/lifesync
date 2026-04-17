@@ -2001,7 +2001,7 @@ async def render_habits(user_id):
             ])
 
     # =========================
-    # 🎯 ЗАДАЧИ
+    # 🎯 ЗАДАЧИ (ФИКС ДАТЫ + ВРЕМЕНИ)
     # =========================
     cur.execute("""
         SELECT rowid, name, days, time
@@ -2014,25 +2014,30 @@ async def render_habits(user_id):
     if tasks:
         text += "\n🎯 <b>Задачи</b>\n\n"
 
-    from datetime import datetime
-
     for tid, name, date, time in tasks:
 
+        # ===== ДАТА =====
         date_str = ""
         if date:
             try:
-                date_str = datetime.strptime(date, "%Y-%m-%d").strftime("%d.%m")
+                dt = datetime.strptime(date, "%Y-%m-%d")
+
+                if dt.year == datetime.now().year:
+                    date_str = dt.strftime("%d.%m")
+                else:
+                    date_str = dt.strftime("%d.%m.%Y")
             except:
                 date_str = date
 
+        # ===== СКРЫВАЕМ ПРОСРОЧЕННЫЕ =====
         if date:
             try:
-                task_date = datetime.strptime(date, "%Y-%m-%d")
-                if task_date < datetime.now():
+                if datetime.strptime(date, "%Y-%m-%d") < datetime.now():
                     continue
             except:
                 pass
 
+        # ===== СТАТУС =====
         cur.execute("""
             SELECT 1 FROM habit_logs
             WHERE habit_id=? AND user_id=? AND status='done'
@@ -2040,12 +2045,20 @@ async def render_habits(user_id):
 
         done = cur.fetchone()
 
-        title = f"{name} ({time})" if time else name
+        # ===== TITLE =====
+        title = name
 
+        if time:
+            title += f" ({time})"
+
+        if date_str:
+            title += f" [{date_str}]"
+
+        # ===== ВЫВОД =====
         if done:
-            text += f"<s>• {title}</s> ({date_str})\n"
+            text += f"<s>• {title}</s>\n"
         else:
-            text += f"• {title} ({date_str})\n"
+            text += f"• {title}\n"
             kb.append([
                 InlineKeyboardButton(text=name, callback_data=f"open_{tid}")
             ])
@@ -2729,7 +2742,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
         order = {day: i for i, day in enumerate(DAYS)}
 
-        # ✅ FIX от пустых дней
         days_list = [d for d in days.split(",") if d]
         days_list = sorted(days_list, key=lambda x: order[x])
 
@@ -2749,7 +2761,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             user_logs[uid] = log_map
 
-        # ===== ДНИ (как в привычках) =====
         labels_line = ""
         for i, d in enumerate(days_list):
             labels_line += d + " "
@@ -2757,7 +2768,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 labels_line += " "
         labels_line = labels_line.strip()
 
-        # ===== БАР (С ПРОБЕЛАМИ) =====
         if h_type == "personal":
             bar_line = ""
 
@@ -2776,10 +2786,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 bar_line += block + " "
 
             bar_line = bar_line.strip()
-
-            streak = get_streak(hid, c.from_user.id)
-            if streak > 0:
-                bar_line = f"{bar_line}{streak}🔥"
 
         else:
             rows = []
@@ -2805,10 +2811,6 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             bar_line = "\n".join(rows)
 
-            streak = get_streak(hid, c.from_user.id)
-            if streak > 0:
-                bar_line = f"{bar_line}{streak}🔥"
-
         title = f"{name} ({time})" if time else name
 
         text += (
@@ -2819,35 +2821,53 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         )
 
     # =========================
-    # 📝 ЗАДАЧИ (НОРМ ЛОГИКА)
+    # 📝 ЗАДАЧИ (ФИКС)
     # =========================
     tasks = [h for h in habits if h[5] == "task"]
 
     if tasks:
         text += "\n📝 <b>Задачи:</b>\n\n"
 
-        idx = 1
         for h in tasks:
-            hid, name, *_ = h
+            hid, name, date, h_type, time, task_type, reminder = h
 
             logs = get_habit_logs(hid, c.from_user.id)
 
-            # ✅ фильтр по периоду
             filtered = []
             for d, s in logs:
                 try:
-                    date = datetime.strptime(d, "%Y-%m-%d")
-                    if date >= start_date:
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    if dt >= start_date:
                         filtered.append((d, s))
                 except:
                     continue
 
             done = any(s == "done" for _, s in filtered)
 
+            # ===== ДАТА =====
+            date_str = ""
+            if date:
+                try:
+                    dt = datetime.strptime(date, "%Y-%m-%d")
+
+                    if dt.year == datetime.now().year:
+                        date_str = dt.strftime("%d.%m")
+                    else:
+                        date_str = dt.strftime("%d.%m.%Y")
+                except:
+                    date_str = date
+
+            title = name
+
+            if time:
+                title += f" ({time})"
+
+            if date_str:
+                title += f" [{date_str}]"
+
             status = "✅" if done else "⏳"
 
-            text += f"{idx}) {name} {status}\n"
-            idx += 1
+            text += f"{title} {status}\n"
 
     # =========================
     # КНОПКИ
@@ -2865,18 +2885,11 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits")])
 
-    try:
-        await c.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-            parse_mode="HTML"
-        )
-    except:
-        await c.message.answer(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-            parse_mode="HTML"
-        )
+    await c.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+        parse_mode="HTML"
+    )
     
 @dp.callback_query(F.data == "prog_week")
 async def prog_week(c: CallbackQuery):
