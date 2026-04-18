@@ -150,6 +150,18 @@ type TEXT,
 category TEXT
 )""")
 
+cur.execute("""
+CREATE TABLE IF NOT EXISTS tasks(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    text TEXT,
+    priority TEXT, -- A / B / C
+    status TEXT DEFAULT 'pending'
+)
+""")
+
+conn.commit()
+
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS habits(
@@ -840,9 +852,59 @@ def fix_db():
         cur.execute("ALTER TABLE users ADD COLUMN fin_enabled INTEGER DEFAULT 0")
 
     conn.commit()
- 
- 
-fix_db() 
+
+
+fix_db()
+
+
+# =========================
+# 🎯 FOCUS / ABC TASKS
+# =========================
+
+def add_focus_columns():
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN current_task_id INTEGER")
+    except:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN focus_active INTEGER DEFAULT 0")
+    except:
+        pass
+
+    conn.commit()
+
+add_focus_columns()
+
+
+def set_main_task(user_id, task_id):
+    cur.execute("""
+        UPDATE users
+        SET current_task_id=?, productivity_main=1
+        WHERE id=?
+    """, (task_id, user_id))
+
+    conn.commit()
+
+
+def start_focus(user_id):
+    cur.execute("""
+        UPDATE users
+        SET focus_active=1
+        WHERE id=?
+    """, (user_id,))
+
+    conn.commit()
+
+
+def stop_focus(user_id):
+    cur.execute("""
+        UPDATE users
+        SET focus_active=0
+        WHERE id=?
+    """, (user_id,))
+
+    conn.commit()
 
 
 import random
