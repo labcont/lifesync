@@ -2001,7 +2001,7 @@ async def render_habits(user_id):
             ])
 
     # =========================
-    # 🎯 ЗАДАЧИ (ФИКС ДАТЫ + ВРЕМЕНИ)
+    # 🎯 ЗАДАЧИ (С FORMAT_TASK)
     # =========================
     cur.execute("""
         SELECT rowid, name, days, time
@@ -2045,22 +2045,19 @@ async def render_habits(user_id):
 
         done = cur.fetchone()
 
-        # ===== TITLE =====
-        title = name
-
-        if time:
-            title += f" ({time})"
-
-        if date_str:
-            title += f" [{date_str}]"
+        # 🔥 FORMAT_TASK
+        task_text = format_task(name, time, date_str, bool(done))
 
         # ===== ВЫВОД =====
         if done:
-            text += f"<s>• {title}</s>\n"
+            text += f"<s>{task_text}</s>\n"
         else:
-            text += f"• {title}\n"
+            text += f"{task_text}\n"
             kb.append([
-                InlineKeyboardButton(text=name, callback_data=f"task_open_{tid}")
+                InlineKeyboardButton(
+                    text=name.capitalize(),
+                    callback_data=f"task_open_{tid}"
+                )
             ])
 
     # =========================
@@ -3312,6 +3309,72 @@ def productivity_settings_menu(user_id):
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_sub")]
     ])
 
+user_focus = {}  # временно (можно потом в БД)
+
+@dp.callback_query(F.data.startswith("focus_"))
+async def start_focus(c: CallbackQuery):
+    task_id = int(c.data.split("_")[1])
+
+    user_focus[c.from_user.id] = {
+        "task_id": task_id,
+        "start": datetime.now()
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏹ Завершить фокус", callback_data="stop_focus")]
+    ])
+
+    await c.message.answer(
+        "🔥 Фокус начат\n\nРаботай только над задачей.",
+        reply_markup=kb
+    )
+
+@dp.callback_query(F.data.startswith("priority_"))
+async def set_priority(c: CallbackQuery):
+    _, task_id, level = c.data.split("_")
+
+    cur.execute("""
+        UPDATE tasks SET priority=? WHERE id=?
+    """, (level, task_id))
+    conn.commit()
+
+    await c.answer(f"Приоритет {level} установлен")
+
+@dp.callback_query(F.data.startswith("make_main_"))
+async def make_main_task(c: CallbackQuery):
+    task_id = int(c.data.split("_")[2])
+
+    # убираем старую главную
+    cur.execute("""
+        UPDATE tasks SET is_main=0 WHERE user_id=?
+    """, (c.from_user.id,))
+
+    # ставим новую
+    cur.execute("""
+        UPDATE tasks SET is_main=1 WHERE id=?
+    """, (task_id,))
+
+    conn.commit()
+
+    await c.answer("🏆 Главная задача установлена")
+
+@dp.callback_query(F.data == "stop_focus")
+async def stop_focus(c: CallbackQuery):
+    data = user_focus.get(c.from_user.id)
+
+    if not data:
+        return await c.answer("Нет активного фокуса")
+
+    task_id = data["task_id"]
+
+    # 👉 автоматически выполняем задачу
+    cur.execute("UPDATE tasks SET done=1 WHERE id=?", (task_id,))
+    conn.commit()
+
+    del user_focus[c.from_user.id]
+
+    await c.message.answer("✅ Задача выполнена через фокус")
+
 @dp.callback_query(F.data == "productivity_settings")
 async def open_productivity_settings(c: CallbackQuery):
     await c.answer()
@@ -3422,7 +3485,21 @@ async def open_stats(m: Message):
         parse_mode="HTML"
     )
     
+def format_task(name, time=None, date=None, done=False):
+    text = name.capitalize()
 
+    if time:
+        text += f" 🕘{time}"
+
+    if date:
+        text += f" 📆{date}"
+
+    if done:
+        text += " ✅"
+    else:
+        text += " ⏳"
+
+    return text
 
 def get_stats_text(user_id):
     print("\n===== [TEXT ANALYTICS START] =====")
@@ -3508,6 +3585,34 @@ def get_stats_text(user_id):
             text += "🔥 Отлично\n"
 
         text += "\n\n💡 Сначала заплати себе, потом всем остальным"
+
+       # =========================
+    # 🔥 ВОТ ЭТО ДОБАВИТЬ
+    # =========================
+
+    cur.execute("""
+        SELECT productivity_main, productivity_plan, productivity_priority
+        FROM users WHERE id=?
+    """, (user_id,))
+    prod = cur.fetchone()
+
+    if prod:
+        main, plan, priority = prod
+
+        text += "\n\n🎯 Продуктивность\n\n"
+
+        if main:
+            text += "🏆 Главная: ✅\n"
+
+        if plan:
+            # пока заглушка, потом прикрутишь реальные задачи
+            text += "📋 План: 0/0\n"
+
+        if priority:
+            text += "⚡ A: 0 задач\n"
+
+        if plan:
+            text += "📊 Эффективность: 0%\n"
 
     return text
 
