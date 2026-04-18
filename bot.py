@@ -2029,7 +2029,7 @@ async def render_habits(user_id):
             except:
                 date_str = date
 
-        # ===== СКРЫВАЕМ ПРОСРОЧЕННЫЕ =====
+        # ===== СКРЫВАЕМ ПРОСРОЧЕННЫЕ ====
         if date:
             try:
                 if datetime.strptime(date, "%Y-%m-%d") < datetime.now():
