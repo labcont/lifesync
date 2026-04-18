@@ -112,10 +112,15 @@ async def set_priority_handler(c: CallbackQuery):
     await c.answer(f"Приоритет: {pr}")
     await task_open(c)    
     
-
 @dp.callback_query(F.data.startswith("task_open_"))
 async def task_open(c: CallbackQuery):
-    hid = int(c.data.split("_")[2])
+    parts = c.data.split("_")
+
+    # 🔥 ФИКС — если прилетело priority_123_A
+    if parts[-1] in ["A", "B", "C"]:
+        hid = int(parts[1])
+    else:
+        hid = int(parts[2])
 
     cur.execute("""
         SELECT name, days, time FROM habits WHERE rowid=?
@@ -140,13 +145,17 @@ async def task_open(c: CallbackQuery):
         except:
             date_str = date
 
-    title = name
-    if time:
-        title += f" ({time})"
-    if date_str:
-        title += f" • {date_str}"
+    # 🔥 УБИРАЕМ [A] из имени
+    clean_name = re.sub(r"^\[[ABC]\]\s*", "", name)
 
-    # ===== настройки пользователя =====
+    title = clean_name.capitalize()
+
+    if time:
+        title += f" 🕘{time}"
+
+    if date_str:
+        title += f" 📆{date_str}"
+
     cur.execute("""
         SELECT productivity_main, productivity_plan, productivity_priority
         FROM users WHERE id=?
@@ -155,13 +164,11 @@ async def task_open(c: CallbackQuery):
 
     kb = []
 
-    # 🔥 ФОКУС (всегда)
     kb.append([InlineKeyboardButton(
         text="▶️ Начать (фокус)",
         callback_data=f"focus_{hid}"
     )])
 
-    # ===== ЕСЛИ ВКЛЮЧЕНЫ ФИЧИ =====
     if main:
         kb.append([InlineKeyboardButton(
             text="🏆 Сделать главной",
@@ -175,7 +182,6 @@ async def task_open(c: CallbackQuery):
             InlineKeyboardButton(text="C", callback_data=f"priority_{hid}_C")
         ])
 
-    # стандарт
     kb.append([
         InlineKeyboardButton(text="✅ Выполнить", callback_data=f"task_done_{hid}")
     ])
@@ -2186,7 +2192,14 @@ async def render_habits(user_id):
     if tasks:
         text += "\n🎯 <b>Задачи</b>\n\n"
 
+    done_count = 0  # 🔥 ПЛАН ДНЯ
+
     for tid, name, date, time in tasks:
+
+        # 🔥 УБИРАЕМ [A]
+        name = re.sub(r"^\[[ABC]\]\s*", "", name)
+
+        name = name.capitalize()
 
         # ===== ДАТА =====
         date_str = ""
@@ -2217,7 +2230,19 @@ async def render_habits(user_id):
 
         done = cur.fetchone()
 
-        task_text = format_task(name, time, date_str, bool(done))
+        if done:
+            done_count += 1
+
+        # 🔥 НОВЫЙ ФОРМАТ
+        task_text = name
+
+        if time:
+            task_text += f" 🕘{time}"
+
+        if date_str:
+            task_text += f" 📆{date_str}"
+
+        task_text += " ✅" if done else " ⏳"
 
         # 🔥 ГЛАВНАЯ ЗАДАЧА
         if tid == main_task:
@@ -2230,10 +2255,14 @@ async def render_habits(user_id):
             text += f"{task_text}\n"
             kb.append([
                 InlineKeyboardButton(
-                    text=name.capitalize(),
+                    text=name,
                     callback_data=f"task_open_{tid}"
                 )
             ])
+
+    # 🔥 ПЛАН ДНЯ
+    if tasks:
+        text = f"📅 <b>План дня ({done_count}/{len(tasks)})</b>\n\n" + text
 
     # =========================
     # 🌅 МАГИЯ УТРА
@@ -3018,8 +3047,14 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     if tasks:
         text += "\n📝 <b>Задачи:</b>\n\n"
 
+        done_count = 0  # 🔥 план
+
         for h in tasks:
             hid, name, date, h_type, time, task_type, reminder = h
+
+            # 🔥 УБИРАЕМ [A]
+            name = re.sub(r"^\[[ABC]\]\s*", "", name)
+            name = name.capitalize()
 
             logs = get_habit_logs(hid, c.from_user.id)
 
@@ -3034,6 +3069,9 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             done = any(s == "done" for _, s in filtered)
 
+            if done:
+                done_count += 1
+
             date_str = ""
             if date:
                 try:
@@ -3042,21 +3080,23 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 except:
                     date_str = date
 
-            title = name
+            task_text = name
 
             if time:
-                title += f" ({time})"
+                task_text += f" 🕘{time}"
 
             if date_str:
-                title += f" [{date_str}]"
+                task_text += f" 📆{date_str}"
 
-            # 🏆 ГЛАВНАЯ
+            task_text += " ✅" if done else " ⏳"
+
             if hid == main_task:
-                title = "🏆 " + title
+                task_text = "🏆 " + task_text
 
-            status = "✅" if done else "⏳"
+            text += task_text + "\n"
 
-            text += f"{title} {status}\n"
+        # 🔥 ПЛАН
+        text = f"📅 <b>План дня ({done_count}/{len(tasks)})</b>\n\n" + text
 
     # =========================
     # КНОПКИ
@@ -3589,6 +3629,9 @@ async def open_stats(m: Message):
     )
     
 def format_task(name, time=None, date=None, done=False):
+    # убираем [A]
+    name = re.sub(r"^\[[ABC]\]\s*", "", name)
+
     text = name.capitalize()
 
     if time:
@@ -3597,10 +3640,7 @@ def format_task(name, time=None, date=None, done=False):
     if date:
         text += f" 📆{date}"
 
-    if done:
-        text += " ✅"
-    else:
-        text += " ⏳"
+    text += " ✅" if done else " ⏳"
 
     return text
 
