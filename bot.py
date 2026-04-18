@@ -2463,12 +2463,36 @@ async def task_list(c: CallbackQuery):
     text = "🗂 Задачи\n\n"
     kb = []
 
+    from datetime import datetime
+
     for i, h in enumerate(tasks, start=1):
-        hid, name, *_ = h
+        hid, name, date, h_type, time, *_ = h
+
+        # ===== ДАТА =====
+        date_str = ""
+        if date:
+            try:
+                dt = datetime.strptime(date, "%Y-%m-%d")
+
+                if dt.year == datetime.now().year:
+                    date_str = dt.strftime("%d.%m")
+                else:
+                    date_str = dt.strftime("%d.%m.%Y")
+            except:
+                date_str = date
+
+        # ===== ЗАГОЛОВОК =====
+        title = name
+
+        if time:
+            title += f" ({time})"
+
+        if date_str:
+            title += f" • {date_str}"
 
         kb.append([
             InlineKeyboardButton(
-                text=f"{i}) {name}",
+                text=f"{i}) {title}",
                 callback_data=f"task_open_{hid}"
             )
         ])
@@ -2488,43 +2512,108 @@ async def task_list(c: CallbackQuery):
 async def task_open(c: CallbackQuery):
     hid = int(c.data.split("_")[2])
 
+    cur.execute("""
+        SELECT name, days, time FROM habits WHERE rowid=?
+    """, (hid,))
+    res = cur.fetchone()
+
+    if not res:
+        return
+
+    name, date, time = res
+
     from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
 
-    logs = get_habit_logs(hid, c.from_user.id)
-    done_today = any(d == date and s == "done" for d, s in logs)
+    date_str = ""
+    if date:
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            if dt.year == datetime.now().year:
+                date_str = dt.strftime("%d.%m")
+            else:
+                date_str = dt.strftime("%d.%m.%Y")
+        except:
+            date_str = date
 
-    status = "✅ Выполнено" if done_today else "⏳ Ожидает"
+    title = name
+    if time:
+        title += f" ({time})"
+    if date_str:
+        title += f" • {date_str}"
+
+    # ===== настройки пользователя =====
+    cur.execute("""
+        SELECT productivity_main, productivity_plan, productivity_priority
+        FROM users WHERE id=?
+    """, (c.from_user.id,))
+    main, plan, priority = cur.fetchone()
 
     kb = []
 
-    if not done_today:
+    # 🔥 ФОКУС (всегда)
+    kb.append([InlineKeyboardButton(
+        text="▶️ Начать (фокус)",
+        callback_data=f"task_focus_{hid}"
+    )])
+
+    # ===== ЕСЛИ ВКЛЮЧЕНЫ ФИЧИ =====
+    if main:
+        kb.append([InlineKeyboardButton(
+            text="🏆 Сделать главной",
+            callback_data=f"task_make_main_{hid}"
+        )])
+
+    if priority:
         kb.append([
-            InlineKeyboardButton(
-                text="✅ Выполнить",
-                callback_data=f"task_done_{hid}"
-            )
+            InlineKeyboardButton(text="A", callback_data=f"task_prio_A_{hid}"),
+            InlineKeyboardButton(text="B", callback_data=f"task_prio_B_{hid}"),
+            InlineKeyboardButton(text="C", callback_data=f"task_prio_C_{hid}")
         ])
 
+    # стандарт
     kb.append([
-        InlineKeyboardButton(
-            text="❌ Удалить",
-            callback_data=f"task_del_{hid}"
-        )
+        InlineKeyboardButton(text="✅ Выполнить", callback_data=f"task_done_{hid}")
     ])
 
     kb.append([
-        InlineKeyboardButton(
-            text="⬅️ Назад",
-            callback_data="task_list"
-        )
+        InlineKeyboardButton(text="❌ Удалить", callback_data=f"task_del_{hid}")
+    ])
+
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="task_list")
     ])
 
     await c.message.edit_text(
-        f"📝 Задача\n\nСтатус: {status}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+        f"📝 Задача\n\n<b>{title}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+        parse_mode="HTML"
     )
 
+FOCUS = {}
+
+@dp.callback_query(F.data.startswith("task_focus_stop_"))
+async def task_focus_stop(c: CallbackQuery):
+    hid = int(c.data.split("_")[3])
+
+    import time
+    start = FOCUS.get(c.from_user.id)
+
+    if start:
+        duration = int(time.time() - start)
+    else:
+        duration = 0
+
+    from datetime import datetime
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    add_habit_log(hid, c.from_user.id, date, "done")
+
+    await c.message.edit_text(
+        f"✅ Выполнено\n⏱ {duration//60} мин",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="task_list")]
+        ])
+    )
 
 @dp.callback_query(F.data.startswith("task_done_"))
 async def task_done(c: CallbackQuery):
@@ -3195,6 +3284,70 @@ async def subscription_handler(m: Message):
     await m.answer(
         "Выбери функцию:",
         reply_markup=keyboards.subscription_menu()
+    )
+
+def productivity_settings_menu(user_id):
+    cur.execute("""
+        SELECT productivity_main, productivity_plan, productivity_priority
+        FROM users WHERE id=?
+    """, (user_id,))
+    main, plan, priority = cur.fetchone()
+
+    def mark(x):
+        return "✅" if x else "❌"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"🏆 Главная задача {mark(main)}",
+            callback_data="prod_toggle_main"
+        )],
+        [InlineKeyboardButton(
+            text=f"📋 План дня {mark(plan)}",
+            callback_data="prod_toggle_plan"
+        )],
+        [InlineKeyboardButton(
+            text=f"⚡ Приоритеты {mark(priority)}",
+            callback_data="prod_toggle_priority"
+        )],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_sub")]
+    ])
+
+@dp.callback_query(F.data == "productivity_settings")
+async def open_productivity_settings(c: CallbackQuery):
+    await c.answer()
+
+    try:
+        await c.message.edit_text(
+            "🎯 <b>Продуктивность</b>\n\nВключи нужные функции:",
+            reply_markup=productivity_settings_menu(c.from_user.id),
+            parse_mode="HTML"
+        )
+    except:
+        await c.message.answer(
+            "🎯 <b>Продуктивность</b>\n\nВключи нужные функции:",
+            reply_markup=productivity_settings_menu(c.from_user.id),
+            parse_mode="HTML"
+        )
+
+@dp.callback_query(F.data.startswith("prod_toggle_"))
+async def toggle_productivity(c: CallbackQuery):
+    field = c.data.replace("prod_toggle_", "")
+
+    column = {
+        "main": "productivity_main",
+        "plan": "productivity_plan",
+        "priority": "productivity_priority"
+    }[field]
+
+    cur.execute(f"""
+        UPDATE users
+        SET {column} = CASE WHEN {column}=1 THEN 0 ELSE 1 END
+        WHERE id=?
+    """, (c.from_user.id,))
+    conn.commit()
+
+    await c.message.edit_reply_markup(
+        reply_markup=productivity_settings_menu(c.from_user.id)
     )
 
 @dp.callback_query(F.data == "back_sub")

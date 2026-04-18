@@ -85,6 +85,22 @@ def init_habits_update():
     except:
         pass
 
+    # ===== PRODUCTIVITY (НОВОЕ) =====
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN productivity_main INTEGER DEFAULT 0")
+    except:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN productivity_plan INTEGER DEFAULT 0")
+    except:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN productivity_priority INTEGER DEFAULT 0")
+    except:
+        pass
+
     conn.commit()
 
     # ===== REMINDERS =====

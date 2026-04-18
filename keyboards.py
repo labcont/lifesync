@@ -92,6 +92,10 @@ def subscription_menu():
         [InlineKeyboardButton(
             text="🌅 «Магия утра» — Х. ЭЛРОД",
             callback_data="morning_menu"
+        )],
+        [InlineKeyboardButton(
+            text="🎯 Продуктивность",
+            callback_data="productivity_settings"
         )]
     ])
 
