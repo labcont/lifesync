@@ -50,6 +50,88 @@ import time
 from middlewaresblock_conflict import USER_INPUT_LOCK
 
 
+@dp.callback_query(F.data.startswith("task_open_"))
+async def task_open(c: CallbackQuery):
+    hid = int(c.data.split("_")[2])
+
+    cur.execute("""
+        SELECT name, days, time FROM habits WHERE rowid=?
+    """, (hid,))
+    res = cur.fetchone()
+
+    if not res:
+        return
+
+    name, date, time = res
+
+    from datetime import datetime
+
+    date_str = ""
+    if date:
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            if dt.year == datetime.now().year:
+                date_str = dt.strftime("%d.%m")
+            else:
+                date_str = dt.strftime("%d.%m.%Y")
+        except:
+            date_str = date
+
+    title = name
+    if time:
+        title += f" ({time})"
+    if date_str:
+        title += f" • {date_str}"
+
+    # ===== настройки пользователя =====
+    cur.execute("""
+        SELECT productivity_main, productivity_plan, productivity_priority
+        FROM users WHERE id=?
+    """, (c.from_user.id,))
+    main, plan, priority = cur.fetchone()
+
+    kb = []
+
+    # 🔥 ФОКУС (всегда)
+    kb.append([InlineKeyboardButton(
+        text="▶️ Начать (фокус)",
+        callback_data=f"focus_{hid}"
+    )])
+
+    # ===== ЕСЛИ ВКЛЮЧЕНЫ ФИЧИ =====
+    if main:
+        kb.append([InlineKeyboardButton(
+            text="🏆 Сделать главной",
+            callback_data=f"make_main_{hid}"
+        )])
+
+    if priority:
+        kb.append([
+            InlineKeyboardButton(text="A", callback_data=f"priority_{hid}_A"),
+            InlineKeyboardButton(text="B", callback_data=f"priority_{hid}_B"),
+            InlineKeyboardButton(text="C", callback_data=f"priority_{hid}_C")
+        ])
+
+    # стандарт
+    kb.append([
+        InlineKeyboardButton(text="✅ Выполнить", callback_data=f"task_done_{hid}")
+    ])
+
+    kb.append([
+        InlineKeyboardButton(text="❌ Удалить", callback_data=f"task_del_{hid}")
+    ])
+
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="task_list")
+    ])
+
+    await c.message.edit_text(
+        f"📝 Задача\n\n<b>{title}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+        parse_mode="HTML"
+    )
+
+
 def add_family_shared_column():
     try:
         cur.execute("ALTER TABLE families ADD COLUMN shared_finance INTEGER DEFAULT 1")
@@ -2517,88 +2599,6 @@ async def task_list(c: CallbackQuery):
 
 
 
-
-
-@dp.callback_query(F.data.startswith("task_open_"))
-async def task_open(c: CallbackQuery):
-    hid = int(c.data.split("_")[2])
-
-    cur.execute("""
-        SELECT name, days, time FROM habits WHERE rowid=?
-    """, (hid,))
-    res = cur.fetchone()
-
-    if not res:
-        return
-
-    name, date, time = res
-
-    from datetime import datetime
-
-    date_str = ""
-    if date:
-        try:
-            dt = datetime.strptime(date, "%Y-%m-%d")
-            if dt.year == datetime.now().year:
-                date_str = dt.strftime("%d.%m")
-            else:
-                date_str = dt.strftime("%d.%m.%Y")
-        except:
-            date_str = date
-
-    title = name
-    if time:
-        title += f" ({time})"
-    if date_str:
-        title += f" • {date_str}"
-
-    # ===== настройки пользователя =====
-    cur.execute("""
-        SELECT productivity_main, productivity_plan, productivity_priority
-        FROM users WHERE id=?
-    """, (c.from_user.id,))
-    main, plan, priority = cur.fetchone()
-
-    kb = []
-
-    # 🔥 ФОКУС (всегда)
-    kb.append([InlineKeyboardButton(
-        text="▶️ Начать (фокус)",
-        callback_data=f"focus_{hid}"
-    )])
-
-    # ===== ЕСЛИ ВКЛЮЧЕНЫ ФИЧИ =====
-    if main:
-        kb.append([InlineKeyboardButton(
-            text="🏆 Сделать главной",
-            callback_data=f"make_main_{hid}"
-        )])
-
-    if priority:
-        kb.append([
-            InlineKeyboardButton(text="A", callback_data=f"priority_{hid}_A"),
-            InlineKeyboardButton(text="B", callback_data=f"priority_{hid}_B"),
-            InlineKeyboardButton(text="C", callback_data=f"priority_{hid}_C")
-        ])
-
-    # стандарт
-    kb.append([
-        InlineKeyboardButton(text="✅ Выполнить", callback_data=f"task_done_{hid}")
-    ])
-
-    kb.append([
-        InlineKeyboardButton(text="❌ Удалить", callback_data=f"task_del_{hid}")
-    ])
-
-    kb.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="task_list")
-    ])
-
-    await c.message.edit_text(
-        f"📝 Задача\n\n<b>{title}</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-        parse_mode="HTML"
-    )
 
 FOCUS = {}
 
