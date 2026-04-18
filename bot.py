@@ -5428,16 +5428,38 @@ def morning_menu_kb(enabled):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+import asyncio
+import signal
+
 async def main():
     asyncio.create_task(reminder_worker(bot))
     asyncio.create_task(weekly_reset_worker())
     asyncio.create_task(finance_notifications_worker(bot))
 
-
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
 
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
 
-if __name__ == "__main__":
-    asyncio.run(main())    
+    def stop():
+        print("🛑 STOP SIGNAL")
+        stop_event.set()
+
+    loop.add_signal_handler(signal.SIGTERM, stop)
+    loop.add_signal_handler(signal.SIGINT, stop)
+
+    polling_task = asyncio.create_task(dp.start_polling(bot))
+
+    await stop_event.wait()
+
+    print("⛔ Stopping polling...")
+    polling_task.cancel()
+
+    try:
+        await polling_task
+    except asyncio.CancelledError:
+        pass
+
+    print("🔻 Closing bot session...")
+    await bot.session.close()  
 
