@@ -2103,6 +2103,15 @@ async def render_habits(user_id):
     week_dates = get_current_week_dates()
 
     # =========================
+    # 🏆 ГЛАВНАЯ ЗАДАЧА
+    # =========================
+    cur.execute("""
+        SELECT current_task_id FROM users WHERE id=?
+    """, (user_id,))
+    main_task = cur.fetchone()
+    main_task = main_task[0] if main_task else None
+
+    # =========================
     # 🏋️ ПРИВЫЧКИ
     # =========================
     for h in habits:
@@ -2160,7 +2169,7 @@ async def render_habits(user_id):
             ])
 
     # =========================
-    # 🎯 ЗАДАЧИ (С FORMAT_TASK)
+    # 🎯 ЗАДАЧИ
     # =========================
     cur.execute("""
         SELECT rowid, name, days, time
@@ -2169,6 +2178,10 @@ async def render_habits(user_id):
     """, (user_id,))
 
     tasks = cur.fetchall()
+
+    # 🔥 СОРТИРОВКА (главная первая)
+    if main_task:
+        tasks = sorted(tasks, key=lambda x: x[0] != main_task)
 
     if tasks:
         text += "\n🎯 <b>Задачи</b>\n\n"
@@ -2204,8 +2217,11 @@ async def render_habits(user_id):
 
         done = cur.fetchone()
 
-        # 🔥 FORMAT_TASK
         task_text = format_task(name, time, date_str, bool(done))
+
+        # 🔥 ГЛАВНАЯ ЗАДАЧА
+        if tid == main_task:
+            task_text = "🏆 " + task_text
 
         # ===== ВЫВОД =====
         if done:
@@ -2884,6 +2900,13 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     else:
         start_date = datetime(2000, 1, 1)
 
+    # 🏆 ГЛАВНАЯ ЗАДАЧА
+    cur.execute("""
+        SELECT current_task_id FROM users WHERE id=?
+    """, (c.from_user.id,))
+    main_task = cur.fetchone()
+    main_task = main_task[0] if main_task else None
+
     text = f"📊 <b>Прогресс</b>\n\n"
     kb = []
 
@@ -2984,9 +3007,13 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         )
 
     # =========================
-    # 📝 ЗАДАЧИ (ФИКС)
+    # 📝 ЗАДАЧИ
     # =========================
     tasks = [h for h in habits if h[5] == "task"]
+
+    # 🔥 СОРТИРОВКА
+    if main_task:
+        tasks = sorted(tasks, key=lambda x: x[0] != main_task)
 
     if tasks:
         text += "\n📝 <b>Задачи:</b>\n\n"
@@ -3007,16 +3034,11 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             done = any(s == "done" for _, s in filtered)
 
-            # ===== ДАТА =====
             date_str = ""
             if date:
                 try:
                     dt = datetime.strptime(date, "%Y-%m-%d")
-
-                    if dt.year == datetime.now().year:
-                        date_str = dt.strftime("%d.%m")
-                    else:
-                        date_str = dt.strftime("%d.%m.%Y")
+                    date_str = dt.strftime("%d.%m")
                 except:
                     date_str = date
 
@@ -3027,6 +3049,10 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             if date_str:
                 title += f" [{date_str}]"
+
+            # 🏆 ГЛАВНАЯ
+            if hid == main_task:
+                title = "🏆 " + title
 
             status = "✅" if done else "⏳"
 
