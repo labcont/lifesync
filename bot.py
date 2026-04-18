@@ -3325,7 +3325,7 @@ def productivity_settings_menu(user_id):
 
 user_focus = {}  # временно (можно потом в БД)
 
-@dp.callback_query(F.data.startswith("focus_"))
+@dp.callback_query(F.data.startswith("task_focus_"))
 async def start_focus(c: CallbackQuery):
     task_id = int(c.data.split("_")[1])
 
@@ -3343,7 +3343,7 @@ async def start_focus(c: CallbackQuery):
         reply_markup=kb
     )
 
-@dp.callback_query(F.data.startswith("priority_"))
+@dp.callback_query(F.data.startswith("task_prio_"))
 async def set_priority(c: CallbackQuery):
     _, task_id, level = c.data.split("_")
 
@@ -3354,7 +3354,7 @@ async def set_priority(c: CallbackQuery):
 
     await c.answer(f"Приоритет {level} установлен")
 
-@dp.callback_query(F.data.startswith("make_main_"))
+@dp.callback_query(F.data.startswith("task_make_main_"))
 async def make_main_task(c: CallbackQuery):
     task_id = int(c.data.split("_")[2])
 
