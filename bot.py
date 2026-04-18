@@ -50,6 +50,69 @@ import time
 from middlewaresblock_conflict import USER_INPUT_LOCK
 
 
+
+@dp.callback_query(F.data.startswith("focus_"))
+async def start_focus_handler(c: CallbackQuery):
+    hid = int(c.data.split("_")[1])
+
+    import time
+    FOCUS[c.from_user.id] = time.time()
+
+    await c.message.edit_text(
+        "🔥 Фокус начат\n\nСконцентрируйся на задаче",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="⏹ Завершить фокус",
+                callback_data=f"task_focus_stop_{hid}"
+            )]
+        ])
+    )
+
+
+@dp.callback_query(F.data.startswith("make_main_"))
+async def make_main_handler(c: CallbackQuery):
+    hid = int(c.data.split("_")[2])
+
+    set_main_task(c.from_user.id, hid)
+
+    await c.answer("🏆 Главная задача установлена")
+    await task_open(c)
+    
+    
+@dp.callback_query(F.data.startswith("priority_"))
+async def set_priority_handler(c: CallbackQuery):
+    _, hid, pr = c.data.split("_")
+    hid = int(hid)
+
+    # сохраняем приоритет прямо в name (быстрое решение)
+    cur.execute("""
+        SELECT name FROM habits WHERE rowid=?
+    """, (hid,))
+    res = cur.fetchone()
+
+    if not res:
+        return
+
+    name = res[0]
+
+    # убираем старый приоритет если был
+    name = re.sub(r"^\[[ABC]\]\s*", "", name)
+
+    # добавляем новый
+    new_name = f"[{pr}] {name}"
+
+    cur.execute("""
+        UPDATE habits
+        SET name=?
+        WHERE rowid=?
+    """, (new_name, hid))
+
+    conn.commit()
+
+    await c.answer(f"Приоритет: {pr}")
+    await task_open(c)    
+    
+
 @dp.callback_query(F.data.startswith("task_open_"))
 async def task_open(c: CallbackQuery):
     hid = int(c.data.split("_")[2])
