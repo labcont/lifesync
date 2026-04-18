@@ -5430,9 +5430,12 @@ def morning_menu_kb(enabled):
 
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
+    asyncio.create_task(reminder_worker(bot))
+    asyncio.create_task(weekly_reset_worker())
+    asyncio.create_task(finance_notifications_worker(bot))
+
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    asyncio.run(main())  
