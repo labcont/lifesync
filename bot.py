@@ -2564,21 +2564,21 @@ async def task_open(c: CallbackQuery):
     # 🔥 ФОКУС (всегда)
     kb.append([InlineKeyboardButton(
         text="▶️ Начать (фокус)",
-        callback_data=f"task_focus_{hid}"
+        callback_data=f"focus_{hid}"
     )])
 
     # ===== ЕСЛИ ВКЛЮЧЕНЫ ФИЧИ =====
     if main:
         kb.append([InlineKeyboardButton(
             text="🏆 Сделать главной",
-            callback_data=f"task_make_main_{hid}"
+            callback_data=f"make_main_{hid}"
         )])
 
     if priority:
         kb.append([
-            InlineKeyboardButton(text="A", callback_data=f"task_prio_A_{hid}"),
-            InlineKeyboardButton(text="B", callback_data=f"task_prio_B_{hid}"),
-            InlineKeyboardButton(text="C", callback_data=f"task_prio_C_{hid}")
+            InlineKeyboardButton(text="A", callback_data=f"priority_{hid}_A"),
+            InlineKeyboardButton(text="B", callback_data=f"priority_{hid}_B"),
+            InlineKeyboardButton(text="C", callback_data=f"priority_{hid}_C")
         ])
 
     # стандарт
