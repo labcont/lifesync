@@ -10,10 +10,25 @@ SAVINGS_BUFFER = {}
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.exceptions import TelegramBadRequest  # ✅ ДОБАВИЛ
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from middlewaresblock_conflict import LOCKED_USERS
 from database import create_family
+
+# 🔥 ПАТЧ (ДОБАВИЛ — НИЧЕГО НЕ ТРОГАЛ ВЫШЕ)
+_old_edit = Message.edit_text
+
+async def patched_edit(self, *args, **kwargs):
+    try:
+        return await _old_edit(self, *args, **kwargs)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return
+        raise
+
+Message.edit_text = patched_edit
+# 🔥 КОНЕЦ ПАТЧА
 
 from config import TOKEN
 from database import *
@@ -33,7 +48,6 @@ dp.callback_query.middleware(BlockConflictMiddleware())
 
 import time
 from middlewaresblock_conflict import USER_INPUT_LOCK
-
 
 
 def add_family_shared_column():
@@ -3133,7 +3147,7 @@ async def reminder_worker(bot: Bot):
                         continue
 
                     # текущее время пользователя
-                    user_now = datetime.utcnow() + timedelta(hours=tz)
+                    user_now = datetime.utcnow() + timedelta(hours=tz or 0)
 
                     # день недели
                     weekday_map = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
@@ -3155,7 +3169,7 @@ async def reminder_worker(bot: Bot):
 
                     # время напоминания
                     if reminder is not None:
-                        remind_time = habit_time - timedelta(minutes=reminder)
+                        remind_time = habit_time - timedelta(minutes=reminder or 0)
                     else:
                         remind_time = habit_time
 
@@ -3644,7 +3658,7 @@ async def finance_notifications_worker(bot: Bot):
             users = cur.fetchall()
 
             for user_id, tz in users:
-                now = datetime.utcnow() + timedelta(hours=tz)
+                now = datetime.utcnow() + timedelta(hours=tz or 0)
 
                 if now.weekday() == 0 and now.hour == 0:
                     key = f"{user_id}_{now.date()}"
@@ -3794,7 +3808,7 @@ async def weekly_reset_worker():
 
             for user_id, tz in users:
                 try:
-                    user_now = datetime.utcnow() + timedelta(hours=tz)
+                    user_now = datetime.utcnow() + timedelta(hours=tz or 0)
 
                     week_key = f"{user_id}_{user_now.strftime('%Y-%W')}"
 
