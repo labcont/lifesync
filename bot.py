@@ -5433,6 +5433,8 @@ async def main():
     asyncio.create_task(weekly_reset_worker())
     asyncio.create_task(finance_notifications_worker(bot))
 
+
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 
