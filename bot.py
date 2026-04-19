@@ -2108,10 +2108,14 @@ async def render_habits(user_id):
 
     week_dates = get_current_week_dates()
 
-    # 🏆 главная
-    cur.execute("""SELECT current_task_id FROM users WHERE id=?""", (user_id,))
+    # 🏆 ГЛАВНАЯ
+    cur.execute("SELECT current_task_id FROM users WHERE id=?", (user_id,))
     main_task = cur.fetchone()
     main_task = main_task[0] if main_task else None
+
+    # 🔥 ФЛАГ ПЛАНА
+    cur.execute("SELECT productivity_plan FROM users WHERE id=?", (user_id,))
+    plan_enabled = cur.fetchone()[0]
 
     # =========================
     # 🏋️ ПРИВЫЧКИ (НЕ ТРОГАЕМ)
@@ -2123,7 +2127,9 @@ async def render_habits(user_id):
             continue
 
         order = {day: i for i, day in enumerate(DAYS)}
-        days_list = sorted([d for d in days.split(",") if d], key=lambda x: order[x])
+
+        days_list = [d for d in days.split(",") if d]
+        days_list = sorted(days_list, key=lambda x: order[x])
 
         logs = get_habit_logs(hid, user_id)
         log_map = {l[0]: l[1] for l in logs}
@@ -2132,24 +2138,41 @@ async def render_habits(user_id):
         for d in days_list:
             date_index = DAYS.index(d)
             date = week_dates[date_index]
+
             key = date + "_" + d
 
             if key in log_map:
-                bar += get_user_color(user_id) if log_map[key] == "done" else "🟥"
+                if log_map[key] == "done":
+                    bar += get_user_color(user_id)
+                elif log_map[key] == "skip":
+                    bar += "🟥"
             else:
                 bar += "⬜"
+
             bar += " "
 
-        labels = " ".join(days_list)
+        bar = bar.strip()
+
+        labels = ""
+        for i, d in enumerate(days_list):
+            labels += d + " "
+            if i == 2:
+                labels += " "
+        labels = labels.strip()
 
         title = f"{name} ({time})" if time else name
 
         text += (
             f"🔹 <b><i>{title}</i></b>\n"
             f"<code>{labels}</code>\n"
-            f"<code>{bar.strip()}</code>\n"
+            f"<code>{bar}</code>\n"
             f"───────────────\n"
         )
+
+        if "⬜" in bar:
+            kb.append([
+                InlineKeyboardButton(text=name, callback_data=f"open_{hid}")
+            ])
 
     # =========================
     # 🎯 ЗАДАЧИ
@@ -2159,6 +2182,7 @@ async def render_habits(user_id):
         FROM habits
         WHERE user_id=? AND task_type='task'
     """, (user_id,))
+
     tasks = cur.fetchall()
 
     tasks = sorted(tasks, key=lambda x: (
@@ -2170,18 +2194,21 @@ async def render_habits(user_id):
         text += "\n🎯 <b>Задачи</b>\n\n"
 
     done_count = 0
-    lines = []
 
     for i, (tid, name, date, time) in enumerate(tasks, start=1):
 
         if name.startswith("[A]"):
-            icon = "🅰️"
+            priority = "🅰️"
         elif name.startswith("[B]"):
-            icon = "🅱️"
+            priority = "🅱️"
         elif name.startswith("[C]"):
-            icon = "🅲"
+            priority = "🅲"
         else:
-            icon = ""
+            priority = "  "
+
+        main_mark = "🏆" if tid == main_task else "  "
+
+        prefix = f"{main_mark} {priority} "
 
         clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
         if len(clean_name) > 1:
@@ -2199,70 +2226,61 @@ async def render_habits(user_id):
             SELECT 1 FROM habit_logs
             WHERE habit_id=? AND user_id=? AND status='done'
         """, (tid, user_id))
+
         done = cur.fetchone()
 
         if done:
             done_count += 1
 
-        if tid == main_task:
-            prefix = f"🏆 {icon}".ljust(4)
-        elif icon:
-            prefix = f"  {icon}".ljust(4)
-        else:
-            prefix = "   ".ljust(4)
-
-        line = f"{prefix}{i}) {clean_name}"
+        task_text = f"{prefix}{i}) {clean_name}"
 
         if time:
-            line += f" 🕘{time}"
+            task_text += f" 🕘{time}"
 
         if date_str:
-            line += f" 🗓{date_str}"
+            task_text += f" 🗓{date_str}"
 
-        line += " ✅" if done else " ⏳"
+        task_text += " ✅" if done else " ⏳"
 
         if done:
-            lines.append(f"<s>{line}</s>")
+            text += f"<s>{task_text}</s>\n"
         else:
-            lines.append(line)
+            text += f"{task_text}\n"
 
-            btn = f"{i}) {clean_name}"
+            btn_title = f"{clean_name}"
             if time:
-                btn += f" 🕘{time}"
+                btn_title += f" 🕘{time}"
             if date_str:
-                btn += f" 🗓{date_str}"
+                btn_title += f" 🗓{date_str}"
 
             kb.append([
                 InlineKeyboardButton(
-                    text=btn,
+                    text=btn_title,
                     callback_data=f"task_open_{tid}"
                 )
             ])
 
-    text += "\n".join(lines)
-
-    # 🔥 ПЛАН ВНИЗУ
-    cur.execute("SELECT productivity_plan FROM users WHERE id=?", (user_id,))
-    plan_enabled = cur.fetchone()[0]
-
+    # 📅 ПЛАН ВНИЗУ
     if tasks and plan_enabled:
         percent = int((done_count / len(tasks)) * 100) if tasks else 0
 
-        import random
-        feedback = random.choice([
-            "Фокус держится — продолжай 🧠",
-            "Хороший прогресс 🔥",
-            "Ты в процессе, не останавливайся ⚡"
-        ])
+        if percent == 0:
+            feedback = "Начни с первой задачи ⚡"
+        elif percent < 50:
+            feedback = "Разгоняешься. Продолжай 💪"
+        elif percent < 100:
+            feedback = "Хороший темп 🔥"
+        else:
+            feedback = "Все выполнено 🏆"
 
         text += (
             f"\n───────────────\n"
-            f"📅 План дня ({done_count}/{len(tasks)})\n"
+            f"📅 План дня: ✔️ {done_count} / {len(tasks)}\n"
             f"📊 Эффективность: {percent}%\n"
             f"🧠 {feedback}\n"
         )
 
-    # 🌅 утро (не трогаем)
+    # 🌅 УТРО
     cur.execute("SELECT morning_enabled FROM users WHERE id=?", (user_id,))
     res = cur.fetchone()
 
@@ -3001,6 +3019,12 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     main_task = cur.fetchone()
     main_task = main_task[0] if main_task else None
 
+    # 🔥 ФЛАГ ПЛАНА
+    cur.execute("""
+        SELECT productivity_plan FROM users WHERE id=?
+    """, (c.from_user.id,))
+    plan_enabled = cur.fetchone()[0]
+
     text = f"📊 <b>Прогресс</b>\n\n"
     kb = []
 
@@ -3114,20 +3138,24 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         text += "\n📝 <b>Задачи:</b>\n\n"
 
         done_count = 0
-        lines = []
 
         for i, h in enumerate(tasks, start=1):
             hid, name, date, h_type, time, task_type, reminder = h
 
-            # ❌ УБРАЛИ 🔤
+            # === ПРИОРИТЕТ (БЕЗ 🔤) ===
             if name.startswith("[A]"):
-                icon = "🅰️"
+                priority = "🅰️"
             elif name.startswith("[B]"):
-                icon = "🅱️"
+                priority = "🅱️"
             elif name.startswith("[C]"):
-                icon = "🅲"
+                priority = "🅲"
             else:
-                icon = ""
+                priority = "  "  # пусто
+
+            # === РОВНЫЙ ОТСТУП ===
+            main_mark = "🏆" if hid == main_task else "  "
+
+            prefix = f"{main_mark} {priority} "
 
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
             if len(clean_name) > 1:
@@ -3135,7 +3163,10 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             logs = get_habit_logs(hid, c.from_user.id)
 
-            done = any(s == "done" for _, s in logs)
+            done = any(
+                datetime.strptime(d, "%Y-%m-%d") >= start_date and s == "done"
+                for d, s in logs if "-" in d
+            )
 
             if done:
                 done_count += 1
@@ -3148,47 +3179,38 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 except:
                     date_str = date
 
-            # 🔥 РОВНОЕ ВЫРАВНИВАНИЕ
-            if hid == main_task:
-                prefix = f"🏆 {icon}".ljust(4)
-            elif icon:
-                prefix = f"  {icon}".ljust(4)
-            else:
-                prefix = "   ".ljust(4)
-
-            line = f"{prefix}{i}) {clean_name}"
+            task_text = f"{prefix}{i}) {clean_name}"
 
             if time:
-                line += f" 🕘{time}"
+                task_text += f" 🕘{time}"
 
             if date_str:
-                line += f" 🗓{date_str}"
+                task_text += f" 🗓{date_str}"
 
-            line += " ✅" if done else " ⏳"
+            task_text += " ✅" if done else " ⏳"
 
-            lines.append(line)
+            text += task_text + "\n"
 
-        text += "\n".join(lines)
-
-        # 🔥 ПЛАН ВНИЗУ
-        cur.execute("""
-            SELECT productivity_plan FROM users WHERE id=?
-        """, (c.from_user.id,))
-        plan_enabled = cur.fetchone()[0]
-
+        # =========================
+        # 📊 АНАЛИТИКА (ВНИЗУ)
+        # =========================
         if plan_enabled:
             percent = int((done_count / len(tasks)) * 100) if tasks else 0
 
-            import random
-            feedback = random.choice([
-                "Держишь темп — продолжай 🧠",
-                "Хороший прогресс, не останавливайся 🔥",
-                "Фокус сохраняется — это главное ⚡"
-            ])
+            if percent == 0:
+                feedback = "Старт есть. Теперь начни выполнять ⚡"
+            elif percent < 30:
+                feedback = "Слабый старт. Включайся быстрее 💪"
+            elif percent < 70:
+                feedback = "Нормальный темп. Держи ритм 🔥"
+            elif percent < 100:
+                feedback = "Почти сделал. Дожми 🏁"
+            else:
+                feedback = "Идеально. Выполнено на 100% 🏆"
 
             text += (
                 f"\n───────────────\n"
-                f"📅 План: ✔ {done_count} / {len(tasks)}\n"
+                f"📅 План: ✔️ {done_count} / {len(tasks)}\n"
                 f"📊 Эффективность: {percent}%\n"
                 f"🧠 {feedback}\n"
             )
