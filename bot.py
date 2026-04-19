@@ -3142,7 +3142,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         for i, h in enumerate(tasks, start=1):
             hid, name, date, h_type, time, task_type, reminder = h
 
-            # === ПРИОРИТЕТ (БЕЗ 🔤) ===
+            # ===== ПРИОРИТЕТ =====
             if name.startswith("[A]"):
                 priority = "🅰️"
             elif name.startswith("[B]"):
@@ -3150,12 +3150,18 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             elif name.startswith("[C]"):
                 priority = "🅲"
             else:
-                priority = "  "  # пусто
+                priority = "  "
 
-            # === РОВНЫЙ ОТСТУП ===
+            # ===== ГЛАВНАЯ =====
             main_mark = "🏆" if hid == main_task else "  "
 
-            prefix = f"{main_mark} {priority} "
+            # ===== ЖЁСТКИЙ ПРЕФИКС (6 СИМВОЛОВ) =====
+            # 1-2: 🏆 или пробелы
+            # 3: пробел
+            # 4-5: 🅰️/🅱️/🅲 или пробелы
+            # 6: пробел
+            prefix = f"{main_mark}{' '}{priority}{' '}"
+            prefix = prefix.ljust(6)
 
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
             if len(clean_name) > 1:
@@ -3192,21 +3198,21 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             text += task_text + "\n"
 
         # =========================
-        # 📊 АНАЛИТИКА (ВНИЗУ)
+        # 📊 АНАЛИТИКА
         # =========================
         if plan_enabled:
             percent = int((done_count / len(tasks)) * 100) if tasks else 0
 
             if percent == 0:
-                feedback = "Старт есть. Теперь начни выполнять ⚡"
+                feedback = "Ты ещё не начал. Выбери первую задачу ⚡"
             elif percent < 30:
-                feedback = "Слабый старт. Включайся быстрее 💪"
+                feedback = "Слабый старт. Включайся 💪"
             elif percent < 70:
-                feedback = "Нормальный темп. Держи ритм 🔥"
+                feedback = "Держишь темп. Продолжай 🔥"
             elif percent < 100:
                 feedback = "Почти сделал. Дожми 🏁"
             else:
-                feedback = "Идеально. Выполнено на 100% 🏆"
+                feedback = "100%. Идеально 🏆"
 
             text += (
                 f"\n───────────────\n"
