@@ -2645,7 +2645,7 @@ async def task_name(m: Message, state: FSMContext):
     await state.update_data(name=name)
     await state.set_state(AddTask.date)
 
-    await m.answer("📅 Введи дату (пример: 14.02 / 14 02 / 14/02 / 14.02.2026)")
+    await m.answer("📅 Введи дату (пример: 1402 — бот сам обработает в 14.02)")
 
 @dp.message(AddTask.date)
 async def task_date(m: Message, state: FSMContext):
@@ -2878,7 +2878,16 @@ def get_current_week_dates():
 def parse_date(text: str):
     from datetime import datetime
 
-    text = text.strip().replace("/", ".").replace(" ", ".")
+    text = text.strip()
+
+    # 🔥 НОВОЕ: формат 1402
+    if text.isdigit() and len(text) == 4:
+        day = text[:2]
+        month = text[2:]
+        text = f"{day}.{month}"
+
+    # старое поведение
+    text = text.replace("/", ".").replace(" ", ".")
 
     parts = text.split(".")
 
@@ -3013,16 +3022,12 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         start_date = datetime(2000, 1, 1)
 
     # 🏆 ГЛАВНАЯ ЗАДАЧА
-    cur.execute("""
-        SELECT current_task_id FROM users WHERE id=?
-    """, (c.from_user.id,))
+    cur.execute("SELECT current_task_id FROM users WHERE id=?", (c.from_user.id,))
     main_task = cur.fetchone()
     main_task = main_task[0] if main_task else None
 
     # 🔥 ФЛАГ ПЛАНА
-    cur.execute("""
-        SELECT productivity_plan FROM users WHERE id=?
-    """, (c.from_user.id,))
+    cur.execute("SELECT productivity_plan FROM users WHERE id=?", (c.from_user.id,))
     plan_enabled = cur.fetchone()[0]
 
     text = f"📊 <b>Прогресс</b>\n\n"
@@ -3045,9 +3050,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             continue
 
         order = {day: i for i, day in enumerate(DAYS)}
-
-        days_list = [d for d in days.split(",") if d]
-        days_list = sorted(days_list, key=lambda x: order[x])
+        days_list = sorted([d for d in days.split(",") if d], key=lambda x: order[x])
 
         active_users = [c.from_user.id] if h_type == "personal" else users
 
@@ -3074,26 +3077,19 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
         if h_type == "personal":
             bar_line = ""
-
             for d in days_list:
                 key = today + "_" + d
                 log_map = user_logs.get(c.from_user.id, {})
 
                 if key in log_map:
-                    if log_map[key] == "done":
-                        block = get_user_color(c.from_user.id)
-                    elif log_map[key] == "skip":
-                        block = "🟥"
+                    block = get_user_color(c.from_user.id) if log_map[key] == "done" else "🟥"
                 else:
                     block = "⬜"
 
                 bar_line += block + " "
-
             bar_line = bar_line.strip()
-
         else:
             rows = []
-
             for uid in active_users:
                 row = ""
                 log_map = user_logs.get(uid, {})
@@ -3102,10 +3098,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                     key = today + "_" + d
 
                     if key in log_map:
-                        if log_map[key] == "done":
-                            block = get_user_color(uid)
-                        elif log_map[key] == "skip":
-                            block = "🟥"
+                        block = get_user_color(uid) if log_map[key] == "done" else "🟥"
                     else:
                         block = "⬜"
 
@@ -3142,7 +3135,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         for i, h in enumerate(tasks, start=1):
             hid, name, date, h_type, time, task_type, reminder = h
 
-            # ===== ПРИОРИТЕТ =====
+            # === ПРИОРИТЕТ ===
             if name.startswith("[A]"):
                 priority = "🅰️"
             elif name.startswith("[B]"):
@@ -3152,16 +3145,11 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             else:
                 priority = "  "
 
-            # ===== ГЛАВНАЯ =====
+            # === ГЛАВНАЯ ===
             main_mark = "🏆" if hid == main_task else "  "
 
-            # ===== ЖЁСТКИЙ ПРЕФИКС (6 СИМВОЛОВ) =====
-            # 1-2: 🏆 или пробелы
-            # 3: пробел
-            # 4-5: 🅰️/🅱️/🅲 или пробелы
-            # 6: пробел
-            prefix = f"{main_mark}{' '}{priority}{' '}"
-            prefix = prefix.ljust(6)
+            # ===== ЖЁСТКО 6 СИМВОЛОВ =====
+            prefix = main_mark + " " + priority + " "
 
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
             if len(clean_name) > 1:
@@ -3197,9 +3185,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             text += task_text + "\n"
 
-        # =========================
-        # 📊 АНАЛИТИКА
-        # =========================
+        # ===== АНАЛИТИКА =====
         if plan_enabled:
             percent = int((done_count / len(tasks)) * 100) if tasks else 0
 
@@ -3222,7 +3208,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             )
 
     # =========================
-    # КНОПКИ (НЕ ТРОГАЕМ)
+    # КНОПКИ
     # =========================
     if mode == "personal":
         kb.append([InlineKeyboardButton(text="👥 Общие", callback_data="progress_family")])
