@@ -2185,28 +2185,39 @@ async def render_habits(user_id):
 
     tasks = cur.fetchall()
 
-    # 🔥 СОРТИРОВКА (главная первая)
-    if main_task:
-        tasks = sorted(tasks, key=lambda x: x[0] != main_task)
+    # 🔥 СОРТИРОВКА (главная + A/B/C)
+    tasks = sorted(tasks, key=lambda x: (
+        x[0] != main_task,
+        get_priority_weight(x[1])
+    ))
 
     if tasks:
         text += "\n🎯 <b>Задачи</b>\n\n"
 
-    done_count = 0  # 🔥 ПЛАН ДНЯ
+    done_count = 0
 
-    for tid, name, date, time in tasks:
+    for i, (tid, name, date, time) in enumerate(tasks, start=1):
 
-        # 🔥 УБИРАЕМ [A]
-        name = re.sub(r"^\[[ABC]\]\s*", "", name)
+        # 🔥 ПРИОРИТЕТ
+        if name.startswith("[A]"):
+            priority = "🅰️"
+        elif name.startswith("[B]"):
+            priority = "🅱️"
+        elif name.startswith("[C]"):
+            priority = "🅲"
+        else:
+            priority = "🔤"
 
-        name = name.capitalize()
+        clean_name = re.sub(r"^\[[ABC]\]\s*", "", name)
+        clean_name = clean_name.strip()
+        if len(clean_name) > 1:
+            clean_name = clean_name[0].upper() + clean_name[1:].lower()
 
         # ===== ДАТА =====
         date_str = ""
         if date:
             try:
                 dt = datetime.strptime(date, "%Y-%m-%d")
-
                 if dt.year == datetime.now().year:
                     date_str = dt.strftime("%d.%m")
                 else:
@@ -2233,8 +2244,8 @@ async def render_habits(user_id):
         if done:
             done_count += 1
 
-        # 🔥 НОВЫЙ ФОРМАТ
-        task_text = name
+        # ===== ТЕКСТ =====
+        task_text = f"{priority}{i}) {clean_name}"
 
         if time:
             task_text += f" 🕘{time}"
@@ -2244,24 +2255,32 @@ async def render_habits(user_id):
 
         task_text += " ✅" if done else " ⏳"
 
-        # 🔥 ГЛАВНАЯ ЗАДАЧА
         if tid == main_task:
             task_text = "🏆 " + task_text
 
-        # ===== ВЫВОД =====
         if done:
             text += f"<s>{task_text}</s>\n"
         else:
             text += f"{task_text}\n"
+
+            btn_title = f"{priority}{i}) {clean_name}"
+            if time:
+                btn_title += f" 🕘{time}"
+            if date_str:
+                btn_title += f" 📆{date_str}"
+
             kb.append([
                 InlineKeyboardButton(
-                    text=name,
+                    text=btn_title,
                     callback_data=f"task_open_{tid}"
                 )
             ])
 
-    # 🔥 ПЛАН ДНЯ
-    if tasks:
+    # 🔥 ПЛАН ДНЯ (ТОЛЬКО ЕСЛИ ВКЛЮЧЕН)
+    cur.execute("SELECT productivity_plan FROM users WHERE id=?", (user_id,))
+    plan_enabled = cur.fetchone()[0]
+
+    if tasks and plan_enabled:
         text = f"📅 <b>План дня ({done_count}/{len(tasks)})</b>\n\n" + text
 
     # =========================
@@ -2942,7 +2961,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     today = now.strftime("%Y-%m-%d")
 
     # =========================
-    # 🔁 ПРИВЫЧКИ
+    # 🔁 ПРИВЫЧКИ (НЕ ТРОГАЕМ)
     # =========================
     for h in habits:
         hid, name, days, h_type, time, task_type, reminder = h
@@ -3041,20 +3060,33 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     tasks = [h for h in habits if h[5] == "task"]
 
     # 🔥 СОРТИРОВКА
-    if main_task:
-        tasks = sorted(tasks, key=lambda x: x[0] != main_task)
+    tasks = sorted(tasks, key=lambda x: (
+        x[0] != main_task,
+        get_priority_weight(x[1])
+    ))
 
     if tasks:
         text += "\n📝 <b>Задачи:</b>\n\n"
 
-        done_count = 0  # 🔥 план
+        done_count = 0
 
-        for h in tasks:
+        for i, h in enumerate(tasks, start=1):
             hid, name, date, h_type, time, task_type, reminder = h
 
-            # 🔥 УБИРАЕМ [A]
-            name = re.sub(r"^\[[ABC]\]\s*", "", name)
-            name = name.capitalize()
+            # 🔥 ПРИОРИТЕТ
+            if name.startswith("[A]"):
+                priority = "🅰️"
+            elif name.startswith("[B]"):
+                priority = "🅱️"
+            elif name.startswith("[C]"):
+                priority = "🅲"
+            else:
+                priority = "🔤"
+
+            clean_name = re.sub(r"^\[[ABC]\]\s*", "", name)
+            clean_name = clean_name.strip()
+            if len(clean_name) > 1:
+                clean_name = clean_name[0].upper() + clean_name[1:].lower()
 
             logs = get_habit_logs(hid, c.from_user.id)
 
@@ -3080,7 +3112,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 except:
                     date_str = date
 
-            task_text = name
+            task_text = f"{priority}{i}) {clean_name}"
 
             if time:
                 task_text += f" 🕘{time}"
@@ -3095,11 +3127,17 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             text += task_text + "\n"
 
-        # 🔥 ПЛАН
-        text = f"📅 <b>План дня ({done_count}/{len(tasks)})</b>\n\n" + text
+        # 🔥 ПЛАН ТОЛЬКО ЕСЛИ ВКЛЮЧЕН
+        cur.execute("""
+            SELECT productivity_plan FROM users WHERE id=?
+        """, (c.from_user.id,))
+        plan_enabled = cur.fetchone()[0]
+
+        if plan_enabled:
+            text = f"📅 <b>План дня ({done_count}/{len(tasks)})</b>\n\n" + text
 
     # =========================
-    # КНОПКИ
+    # КНОПКИ (НЕ ТРОГАЕМ)
     # =========================
     if mode == "personal":
         kb.append([InlineKeyboardButton(text="👥 Общие", callback_data="progress_family")])
@@ -3119,7 +3157,18 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
         parse_mode="HTML"
     )
-    
+ 
+
+def get_priority_weight(name):
+    if name.startswith("[A]"):
+        return 0
+    if name.startswith("[B]"):
+        return 1
+    if name.startswith("[C]"):
+        return 2
+    return 3
+
+ 
 @dp.callback_query(F.data == "prog_week")
 async def prog_week(c: CallbackQuery):
     mode = USER_MODE.get(c.from_user.id, "personal")
