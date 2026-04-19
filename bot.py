@@ -2574,14 +2574,7 @@ async def choose_action(c: CallbackQuery):
 # Задачи
 # -------------------------
  
-def get_priority_icon(name):
-    if name.startswith("[A]"):
-        return "🅰️"
-    if name.startswith("[B]"):
-        return "🅱️"
-    if name.startswith("[C]"):
-        return "🅲"
-    return ""  # ❌ УБРАЛИ 🔤
+
 
 
 def normalize_title(name: str):
@@ -3160,7 +3153,8 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             # 🔥 ВОТ ЭТА СТРОКА НОВАЯ (после prefix)
             if priority in ["A", "B", "C"]:
-                prefix = prefix.replace(f" {priority}", f" <b>{priority}</b>")
+                # заменяем ТОЛЬКО символ, не ломая пробелы
+                prefix = prefix.replace(f" {priority}", f" <b>{priority}</b>", 1)
 
             # === ИМЯ ===
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
