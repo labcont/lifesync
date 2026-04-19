@@ -336,25 +336,39 @@ async def set_name_settings(m: Message, state: FSMContext):
         reply_markup=keyboards.settings_menu()
     )
 
-def normalize_date(text):
-    import re
+def normalize_date(text: str):
     from datetime import datetime
 
-    nums = re.findall(r"\d+", text)
+    text = text.strip()
 
-    if len(nums) < 2:
-        return None
+    # 🔥 формат 1402
+    if text.isdigit() and len(text) == 4:
+        day = int(text[:2])
+        month = int(text[2:])
+        year = datetime.now().year
 
-    day = int(nums[0])
-    month = int(nums[1])
+        try:
+            dt = datetime(year, month, day)
+            return dt.strftime("%Y-%m-%d")
+        except:
+            return None
 
-    year = datetime.now().year
-    if len(nums) >= 3:
-        year = int(nums[2])
+    # стандартные форматы
+    text = text.replace("/", ".").replace(" ", ".")
+    parts = text.split(".")
 
     try:
-        dt = datetime(year, month, day)
-        return dt.strftime("%Y-%m-%d")  # 🔥 ЕДИНЫЙ ФОРМАТ
+        if len(parts) == 2:
+            day, month = parts
+            year = datetime.now().year
+        elif len(parts) == 3:
+            day, month, year = parts
+        else:
+            return None
+
+        dt = datetime(int(year), int(month), int(day))
+        return dt.strftime("%Y-%m-%d")
+
     except:
         return None
 
@@ -2581,17 +2595,13 @@ def normalize_title(name: str):
 def pad_prefix(priority, is_main):
     """
     Ровно 6 символов:
-
-    [1] 🏆 или пробел
-    [2] пробел
-    [3] A/B/C или пробел
-    [4-6] пробелы
+    🏆 + пробел + A/B/C + пробелы
     """
 
-    main = "🏆" if is_main else "  "
+    main = "🏆" if is_main else " "
 
     if priority in ["A", "B", "C"]:
-        pr = priority
+        pr = f"<b>{priority}</b>"
     else:
         pr = " "
 
