@@ -3029,9 +3029,12 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     main_task = cur.fetchone()
     main_task = main_task[0] if main_task else None
 
-    # 🔥 ФЛАГ ПЛАНА
-    cur.execute("SELECT productivity_plan FROM users WHERE id=?", (c.from_user.id,))
-    plan_enabled = cur.fetchone()[0]
+    # 🔥 НАСТРОЙКИ
+    cur.execute("""
+        SELECT productivity_plan, productivity_main, productivity_priority
+        FROM users WHERE id=?
+    """, (c.from_user.id,))
+    plan_enabled, main_enabled, priority_enabled = cur.fetchone()
 
     text = f"📊 <b>Прогресс</b>\n\n"
     kb = []
@@ -3148,12 +3151,15 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             else:
                 priority = ""
 
-            # === ПРЕФИКС ===
-            prefix = pad_prefix(priority, hid == main_task)
+            # === УЧЁТ НАСТРОЕК ===
+            is_main_active = (hid == main_task) and main_enabled
+            priority_active = priority if priority_enabled else ""
 
-            # 🔥 ВОТ ЭТА СТРОКА НОВАЯ (после prefix)
-            if priority in ["A", "B", "C"]:
-                # заменяем ТОЛЬКО символ, не ломая пробелы
+            # === ПРЕФИКС ===
+            prefix = pad_prefix(priority_active, is_main_active)
+
+            # 🔥 ЖИРНЫЙ ABC (если включены)
+            if priority_enabled and priority in ["A", "B", "C"]:
                 prefix = prefix.replace(f" {priority}", f" <b>{priority}</b>", 1)
 
             # === ИМЯ ===
