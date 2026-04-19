@@ -2208,7 +2208,7 @@ async def render_habits(user_id):
 
         main_mark = "🏆" if tid == main_task else "  "
 
-        prefix = f"{main_mark} {priority} "
+        prefix = pad_prefix(priority, tid == main_task)
 
         clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
         if len(clean_name) > 1:
@@ -2578,19 +2578,24 @@ def normalize_title(name: str):
     return name.upper()
 
 
-def pad_prefix(icon, is_main):
+def pad_prefix(priority, is_main):
     """
-    Делает ровный отступ:
-    🏆 🅰️
-      🅱️
-      🅲
-        (пусто)
+    Ровно 6 символов:
+
+    [1] 🏆 или пробел
+    [2] пробел
+    [3] A/B/C или пробел
+    [4-6] пробелы
     """
-    if is_main:
-        return f"🏆 {icon}".ljust(4)
-    if icon:
-        return f"  {icon}".ljust(4)
-    return "   ".ljust(4) 
+
+    main = "🏆" if is_main else "  "
+
+    if priority in ["A", "B", "C"]:
+        pr = priority
+    else:
+        pr = " "
+
+    return f"{main} {pr}".ljust(6)
  
 def get_smart_feedback(done, total):
     if total == 0:
@@ -3137,24 +3142,23 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             # === ПРИОРИТЕТ ===
             if name.startswith("[A]"):
-                priority = "🅰️"
+                priority = "A"
             elif name.startswith("[B]"):
-                priority = "🅱️"
+                priority = "B"
             elif name.startswith("[C]"):
-                priority = "🅲"
+                priority = "C"
             else:
-                priority = "  "
+                priority = ""
 
-            # === ГЛАВНАЯ ===
-            main_mark = "🏆" if hid == main_task else "  "
+            # === ПРЕФИКС ===
+            prefix = pad_prefix(priority, hid == main_task)
 
-            # ===== ЖЁСТКО 6 СИМВОЛОВ =====
-            prefix = main_mark + " " + priority + " "
-
+            # === ИМЯ ===
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
             if len(clean_name) > 1:
                 clean_name = clean_name[0].upper() + clean_name[1:].lower()
 
+            # === ЛОГИ ===
             logs = get_habit_logs(hid, c.from_user.id)
 
             done = any(
@@ -3165,6 +3169,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
             if done:
                 done_count += 1
 
+            # === ДАТА ===
             date_str = ""
             if date:
                 try:
@@ -3173,6 +3178,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
                 except:
                     date_str = date
 
+            # === ТЕКСТ ===
             task_text = f"{prefix}{i}) {clean_name}"
 
             if time:
