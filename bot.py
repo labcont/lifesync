@@ -2593,15 +2593,10 @@ def normalize_title(name: str):
 
 
 def pad_prefix(priority, is_main):
-    """
-    Ровно 6 символов:
-    🏆 + пробел + A/B/C + пробелы
-    """
-
-    main = "🏆" if is_main else " "
+    main = "🏆" if is_main else "   "
 
     if priority in ["A", "B", "C"]:
-        pr = f"<b>{priority}</b>"
+        pr = priority
     else:
         pr = " "
 
@@ -3162,6 +3157,10 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
 
             # === ПРЕФИКС ===
             prefix = pad_prefix(priority, hid == main_task)
+
+            # 🔥 ВОТ ЭТА СТРОКА НОВАЯ (после prefix)
+            if priority in ["A", "B", "C"]:
+                prefix = prefix.replace(f" {priority}", f" <b>{priority}</b>")
 
             # === ИМЯ ===
             clean_name = re.sub(r"^\[[ABC]\]\s*", "", name).strip()
