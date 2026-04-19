@@ -361,7 +361,8 @@ def get_habits(user_id):
         cur.execute("""
             SELECT rowid, name, days, type, time, task_type, reminder
             FROM habits
-            WHERE user_id=? OR (family_id=? AND type='family')
+            WHERE (type='personal' AND user_id=?)
+               OR (type='family' AND family_id=?)
         """, (user_id, family_id))
     else:
         cur.execute("""
@@ -439,14 +440,18 @@ def get_user(user_id):
 
 
 def save_user_timezone(user_id, tz):
-    cur.execute("UPDATE users SET timezone=? WHERE id=?", (tz, user_id))
+    cur.execute("UPDATE users SET timezone=?, tz=? WHERE id=?", (tz, tz, user_id))
     conn.commit()
 
 
 def get_user_timezone(user_id):
-    cur.execute("SELECT timezone FROM users WHERE id=?", (user_id,))
+    cur.execute("""
+        SELECT COALESCE(tz, timezone, 0)
+        FROM users
+        WHERE id=?
+    """, (user_id,))
     res = cur.fetchone()
-    return res[0] if res else None    
+    return res[0] if res else 0
     
 # =========================
 # 👥 FAMILY

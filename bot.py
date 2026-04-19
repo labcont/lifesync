@@ -261,8 +261,8 @@ async def set_timezone(c: CallbackQuery, state: FSMContext):
     # =========================
     else:
         cur.execute(
-            "UPDATE users SET timezone=? WHERE id=?",
-            (tz, c.from_user.id)
+            "UPDATE users SET timezone=?, tz=? WHERE id=?",
+            (tz, tz, c.from_user.id)
         )
         conn.commit()
 
@@ -386,12 +386,26 @@ def get_user_color(user_id):
         return profile[2] or "🟩"
     return "🟩"
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
+
+def get_user_now(user_id):
+    return datetime.utcnow() + timedelta(hours=(get_user_timezone(user_id) or 0))
+
+
+def get_user_today(user_id):
+    return get_user_now(user_id).strftime("%Y-%m-%d")
+
+
+def format_feedback_username(user):
+    if getattr(user, "username", None):
+        return f"@{user.username}"
+    if getattr(user, "first_name", None):
+        return user.first_name
+    return "без имени"
 
 def get_morning_progress(user_id):
-    from datetime import datetime
-
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(user_id)
 
     cur.execute("""
         SELECT step FROM morning_logs
@@ -2127,10 +2141,9 @@ async def render_habits(user_id):
 
     kb = []
 
-    from datetime import datetime
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = get_user_today(user_id)
 
-    week_dates = get_current_week_dates()
+    week_dates = get_current_week_dates(user_id)
 
     # 🏆 ГЛАВНАЯ
     cur.execute("SELECT current_task_id FROM users WHERE id=?", (user_id,))
@@ -2328,8 +2341,7 @@ async def show_my_habits(c: CallbackQuery, mode="personal"):
     habits = get_habits(c.from_user.id)
     users = get_family_members(c.from_user.id)
 
-    from datetime import datetime
-    week_dates = get_current_week_dates()
+    week_dates = get_current_week_dates(c.from_user.id)
 
     text = "📋 <b>Мои привычки</b>\n\n"
     kb = []
@@ -2526,7 +2538,7 @@ async def choose_action(c: CallbackQuery):
     days = [d for d in habit[2].split(",") if d]
 
     from datetime import datetime
-    week_dates = get_current_week_dates()
+    week_dates = get_current_week_dates(c.from_user.id)
 
     if len(days) == 1:
         d = days[0]
@@ -2818,8 +2830,7 @@ async def task_focus_stop(c: CallbackQuery):
     else:
         duration = 0
 
-    from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(c.from_user.id)
 
     add_habit_log(hid, c.from_user.id, date, "done")
 
@@ -2835,8 +2846,7 @@ async def task_done(c: CallbackQuery):
     hid = int(c.data.split("_")[2])
     user_id = c.from_user.id
 
-    from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(user_id)
 
     logs = get_habit_logs(hid, user_id)
 
@@ -2875,10 +2885,10 @@ async def habit_progress(c: CallbackQuery):
         await c.message.answer("Ошибка открытия прогресса")
 
 
-def get_current_week_dates():
+def get_current_week_dates(user_id=None):
     from datetime import datetime, timedelta
 
-    today = datetime.now()
+    today = get_user_now(user_id) if user_id is not None else datetime.utcnow()
     start = today - timedelta(days=today.weekday())  # понедельник
 
     week = []
@@ -2924,9 +2934,7 @@ def parse_date(text: str):
 
 @dp.callback_query(F.data == "done_plan")
 async def done_plan(c: CallbackQuery):
-    from datetime import datetime
-
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(c.from_user.id)
 
     # 🔥 ПРОВЕРКА
     cur.execute("""
@@ -2997,7 +3005,7 @@ async def habit_done(c: CallbackQuery):
     except:
         return
 
-    week_dates = get_current_week_dates()
+    week_dates = get_current_week_dates(c.from_user.id)
 
     date_index = DAYS.index(day)
     date = week_dates[date_index]
@@ -3024,8 +3032,7 @@ async def show_progress(c: CallbackQuery, mode="personal", period="week"):
     habits = get_habits(c.from_user.id)
     users = get_family_members(c.from_user.id)
 
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    now = get_user_now(c.from_user.id)
 
     if period == "week":
         start_date = now - timedelta(days=7)
@@ -3296,7 +3303,7 @@ async def habit_skip(c: CallbackQuery):
     _, hid, day = c.data.split("_")
     hid = int(hid)
 
-    week_dates = get_current_week_dates()
+    week_dates = get_current_week_dates(c.from_user.id)
 
     date_index = DAYS.index(day)
     date = week_dates[date_index]
@@ -3407,8 +3414,10 @@ async def reminder_worker(bot: Bot):
     while True:
         try:
             cur.execute("""
-                SELECT rowid, user_id, name, days, time, reminder, tz
-                FROM habits
+                SELECT h.rowid, h.user_id, h.name, h.days, h.time, h.reminder,
+                       COALESCE(h.tz, u.tz, u.timezone, 0)
+                FROM habits h
+                LEFT JOIN users u ON u.id = h.user_id
                 WHERE time IS NOT NULL
             """)
             habits = cur.fetchall()
@@ -3693,9 +3702,6 @@ async def open_productivity_settings(c: CallbackQuery):
             "— 🏆 Главная задача → фокус на одном результате\n"
             "— ⚡ Приоритеты A/B/C → чёткая система выбора\n"
             "— 📅 План дня → контроль выполнения и эффективности\n\n"
-
-            "👉 Инструмент, который превращает список задач в систему действий\n"
-            "и убирает прокрастинацию через фокус и приоритеты\n\n"
 
             "Включи нужные функции:",
             reply_markup=productivity_settings_menu(c.from_user.id),
@@ -3986,19 +3992,18 @@ async def set_name(m: Message, state: FSMContext):
 
 async def finance_notifications_worker(bot: Bot):
     import asyncio
-    from datetime import datetime, timedelta
 
     last_sent = {}
 
     while True:
         try:
-            cur.execute("SELECT id, tz FROM users")
+            cur.execute("SELECT id FROM users")
             users = cur.fetchall()
 
-            for user_id, tz in users:
-                now = datetime.utcnow() + timedelta(hours=tz or 0)
+            for (user_id,) in users:
+                now = get_user_now(user_id)
 
-                if now.weekday() == 0 and now.hour == 0:
+                if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
                     key = f"{user_id}_{now.date()}"
 
                     if last_sent.get(user_id) == key:
@@ -4042,9 +4047,9 @@ async def set_color_callback(c: CallbackQuery, state: FSMContext):
 
         cur.execute("""
             UPDATE users
-            SET name=?, timezone=?, color=?, gender=?
+            SET name=?, timezone=?, tz=?, color=?, gender=?
             WHERE id=?
-        """, (data["name"], data["timezone"], color, gender, c.from_user.id))
+        """, (data["name"], data["timezone"], data["timezone"], color, gender, c.from_user.id))
         conn.commit()
 
         await state.clear()
@@ -4131,7 +4136,6 @@ async def toggle_tips_handler(c: CallbackQuery):
 
   
 async def weekly_reset_worker():
-    from datetime import datetime, timedelta
     import asyncio
 
     last_reset = {}
@@ -4139,8 +4143,9 @@ async def weekly_reset_worker():
     while True:
         try:
             cur.execute("""
-                SELECT DISTINCT user_id, tz
-                FROM habits
+                SELECT DISTINCT h.user_id, COALESCE(u.tz, u.timezone, h.tz, 0)
+                FROM habits h
+                LEFT JOIN users u ON u.id = h.user_id
             """)
             users = cur.fetchall()
 
@@ -4804,7 +4809,7 @@ def is_morning_enabled(user_id):
 
 
 async def finish_step_and_return(c, step):
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(c.from_user.id)
 
     complete_morning_step(c.from_user.id, step, date)
 
@@ -4983,8 +4988,7 @@ async def start_affirm(c: CallbackQuery):
     if await return_to_active_timer(c):
         return
 
-    from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(c.from_user.id)
 
     # 🔥 БЛОК ПОВТОРНОГО ВЫПОЛНЕНИЯ
     cur.execute("""
@@ -5190,8 +5194,7 @@ async def start_read(c: CallbackQuery, state: FSMContext):
     if await return_to_active_timer(c):
         return
 
-    from datetime import datetime
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = get_user_today(c.from_user.id)
 
     cur.execute("""
         SELECT 1 FROM morning_logs
@@ -5518,7 +5521,7 @@ async def feedback_text(m: Message, state: FSMContext):
 async def skip_photo(c: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
-    username = f"@{c.from_user.username}" if c.from_user.username else "—"
+    username = format_feedback_username(c.from_user)
 
     text = (
         "📩 Новое обращение\n\n"
@@ -5539,7 +5542,7 @@ async def skip_photo(c: CallbackQuery, state: FSMContext):
 async def feedback_photo(m: Message, state: FSMContext):
     data = await state.get_data()
 
-    username = f"@{m.from_user.username}" if m.from_user.username else "—"
+    username = format_feedback_username(m.from_user)
 
     caption = (
         "📩 Новое обращение\n\n"
