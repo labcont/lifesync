@@ -61,9 +61,9 @@ def savings_menu():
 def habits_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Привычка", callback_data="habit_add")],
-        [InlineKeyboardButton(text="📝 Задача", callback_data="task_add")],
-        [InlineKeyboardButton(text="⚙️ Привычки", callback_data="habit_list")],
-        [InlineKeyboardButton(text="🗂 Задачи", callback_data="task_list")],
+        [InlineKeyboardButton(text="➕ Задача", callback_data="task_add")],
+        [InlineKeyboardButton(text="⚙️ Управление Привычками", callback_data="habit_list")],
+        [InlineKeyboardButton(text="🛠️ Управление Задачами", callback_data="task_list")],
         [InlineKeyboardButton(text="📊 Прогресс", callback_data="habit_progress")],
     ])
 
@@ -94,7 +94,7 @@ def subscription_menu():
             callback_data="morning_menu"
         )],
         [InlineKeyboardButton(
-            text="🎯 Продуктивность",
+            text="🎯  «Выйди из зоны комфорта» — Брайан Трейси",
             callback_data="productivity_settings"
         )]
     ])
